@@ -845,6 +845,37 @@ def test_cloudkit_config_resolves_private_file_and_dry_run_does_not_launch_it(li
     bl.sync_cloudkit(cfg, cloud_summary(), {})
 
 
+@pytest.mark.parametrize("code, expected", [(11, 11), (2, 2), (True, None), ("11", None),
+                                         ([11], None), (-1, None), (2**64, None), (None, None)])
+def test_cloud_sync_relays_only_bounded_integer_error_codes(listener_state, monkeypatch, code, expected):
+    cfg, _, _ = cloud_fixture(listener_state)
+    output = json.dumps({"event": "cloudkit_sync", "ok": False, "code": code,
+                         "reason": "private account details"})
+    monkeypatch.setattr(bl, "run", lambda *a, **k: (1, output, "private stderr"))
+    health = {}
+    bl.sync_cloudkit(cfg, cloud_summary(), health)
+    last = json.loads(bl.LOG.read_text().splitlines()[-1])
+    assert health["cloudkit"]["ok"] is False and last["ok"] is False
+    assert health["cloudkit"].get("code") == expected and last.get("code") == expected
+    assert "private" not in bl.LOG.read_text()
+
+
+def test_cloud_signing_failure_has_fixed_diagnostic_and_cannot_be_hidden_by_success(listener_state, monkeypatch):
+    cfg, _, _ = cloud_fixture(listener_state)
+    output = "\n".join(json.dumps(e) for e in (
+        {"event": "cloudkit_signing_error", "reason": "private team/account details"},
+        {"event": "cloudkit_sync", "ok": True}))
+    monkeypatch.setattr(bl, "run", lambda *a, **k: (0, output, ""))
+    health = {}
+    summary = cloud_summary()
+    bl.sync_cloudkit(cfg, summary, health)
+    assert health["cloudkit"]["ok"] is False and summary["errors"] == 1
+    assert health["cloudkit"]["reason"] == "reader provisioning check failed"
+    events = [json.loads(line) for line in bl.LOG.read_text().splitlines()]
+    assert any(e["event"] == "cloudkit_signing_error" and e["reason"] == health["cloudkit"]["reason"] for e in events)
+    assert "private" not in bl.LOG.read_text()
+
+
 def test_inbox_history_prevents_duplicate_after_seen_store_loss(listener_state):
     cfg, rec, _ = cloud_fixture(listener_state)
     filer = CloudFakeFiler()
