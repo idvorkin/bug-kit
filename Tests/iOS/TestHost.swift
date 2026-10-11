@@ -1,4 +1,6 @@
 import UIKit
+import SwiftUI
+import BugKit
 
 // UIApplication dispatches UIControl target actions; a hostless logic-test runner cannot exercise them.
 @main
@@ -17,8 +19,33 @@ final class DiagnosticsSceneDelegate: UIResponder, UIWindowSceneDelegate {
   func scene(_ scene: UIScene, willConnectTo session: UISceneSession, options: UIScene.ConnectionOptions) {
     guard let scene = scene as? UIWindowScene else { return }
     let window = UIWindow(windowScene: scene)
-    window.rootViewController = UIViewController()
+    if CommandLine.arguments.contains("--whats-new-test") {
+      window.rootViewController = UIHostingController(rootView: WhatsNewTestScreen())
+    } else {
+      window.rootViewController = UIViewController()
+    }
     window.makeKeyAndVisible()
     self.window = window
+  }
+}
+
+private struct WhatsNewTestScreen: View {
+  private let defaults = UserDefaults(suiteName: "bugkit.whats-new-ui-test")!
+  private let feed = WhatsNewFeed(generated: "fixture", days: [
+    .init(day: "2026-10-11", items: [.init(story: 1, text: "A visible change", sha: "fixture")])
+  ])
+  private var dark: Bool { CommandLine.arguments.contains("--dark") }
+
+  init() { defaults.removePersistentDomain(forName: "bugkit.whats-new-ui-test") }
+
+  var body: some View {
+    VStack {
+      WhatsNewRow(feed: feed, seen: WhatsNewSeen(defaults: defaults), logger: { _, _ in }, open: {})
+        .padding()
+        .background(dark ? Color.black : Color.white)
+      Spacer()
+    }
+    .padding()
+    .preferredColorScheme(dark ? .dark : .light)
   }
 }

@@ -14,6 +14,8 @@ targets:
     platform: iOS
     sources:
       - TestHost.swift
+    dependencies:
+      - target: BugKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: local.bugkit.diagnostics-host
@@ -37,12 +39,21 @@ targets:
       base:
         TEST_HOST: "$(BUILT_PRODUCTS_DIR)/DiagnosticsHost.app/DiagnosticsHost"
         BUNDLE_LOADER: "$(TEST_HOST)"
+  WhatsNewUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - WhatsNewUITests.swift
+    dependencies:
+      - target: DiagnosticsHost
 schemes:
   BugKitDiagnostics:
     build:
       targets:
         BugKit: all
         DiagnosticsTests: [test]
+        WhatsNewUITests: [test]
     test:
       targets:
         - DiagnosticsTests
+        - WhatsNewUITests
