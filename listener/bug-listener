@@ -828,6 +828,8 @@ def sync_cloudkit(cfg: dict, summary: dict, health: dict) -> None:
     log("cloudkit_poll")
     rc, out, _ = run([str(executable), "--container", cloud["container"], "--inbox", cloud["inbox"], "--environment", cloud["environment"]], timeout=180)
     completed = False
+    failed = False
+    diagnostics = {}
     for line in out.splitlines():
         try:
             event = json.loads(line)
@@ -839,17 +841,27 @@ def sync_cloudkit(cfg: dict, summary: dict, health: dict) -> None:
                     key = str(uuid.UUID(event.get("id"))).upper()
                 reason = event.get("reason") if event.get("reason") in CLOUD_PENDING_REASONS else "unknown"
                 log("cloudkit_report_pending", key=key, reason=reason)
-            elif event.get("event") == "cloudkit_sync" and event.get("ok") is True:
-                completed = True
+            elif event.get("event") == "cloudkit_signing_error":
+                failed = True
+                diagnostics["reason"] = "reader provisioning check failed"
+                log("cloudkit_signing_error", reason=diagnostics["reason"])
+            elif event.get("event") == "cloudkit_sync":
+                if event.get("ok") is True:
+                    completed = True
+                elif event.get("ok") is False:
+                    failed = True
+                    code = event.get("code")
+                    if type(code) is int and 0 <= code <= 2**31 - 1:
+                        diagnostics["code"] = code
         except (ValueError, AttributeError, TypeError):
             continue
-    ok = rc == 0 and completed
-    health["cloudkit"] = {"ok": ok, "last_attempt": now(), "rc": rc}
+    ok = rc == 0 and completed and not failed
+    health["cloudkit"] = {"ok": ok, "last_attempt": now(), "rc": rc, **diagnostics}
     if ok:
         summary["reachable"] += 1
     else:
         summary["errors"] += 1
-    log("cloudkit_sync", ok=ok, rc=rc, ms=int((time.monotonic() - started) * 1000))
+    log("cloudkit_sync", ok=ok, rc=rc, ms=int((time.monotonic() - started) * 1000), **diagnostics)
 
 
 def poll_cloud_reports(cfg: dict, seen: dict, filer: Filer, summary: dict, backfill: bool) -> None:
