@@ -204,7 +204,9 @@ Mac's login session.
 
 Cloud events: `cloudkit_poll`, `cloudkit_downloaded` (key/bundle), `cloudkit_report_pending` (key = the failed
 report UUID, or null when the record name is not a UUID; reason = `download or evidence validation failed`,
-`listing failed or record metadata is invalid` or `unknown`), `cloudkit_sync` (ok/rc/ms), `cloudkit_report_error`
+`listing failed or record metadata is invalid` or `unknown`), `cloudkit_sync` (ok/rc/ms, plus a bounded integer
+CloudKit `code` on a reported failure), `cloudkit_signing_error` (fixed `reader provisioning check failed`
+reason), `cloudkit_report_error`
 and `devices_error`, then the existing `file` and new `inbox` event for each successful handoff. Sync output/error codes are sanitized; account/record contents are not logged. Downloads
 have no first-contact baseline: apps upload only reports saved after opt-in, so the configured apps' first
 reports are filed immediately. Unknown app bundles
