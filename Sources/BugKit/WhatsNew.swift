@@ -125,7 +125,7 @@ public enum WhatsNew {
   private static let leadingStory = try! NSRegularExpression(
     pattern: #"^Story\s+(\d+)\s*(?:\(#(\d+)\))?\s*[:—–-]?\s*(.*)$"#, options: [.caseInsensitive])
   private static let bracketStories = try! NSRegularExpression(
-    pattern: #"\s*\((?:story|stories)\s+(\d+)([^)]*)\)"#, options: [.caseInsensitive])
+    pattern: #"\s*\((?:#\d+\s*[,;]\s*)*(?:story|stories)\s+(\d+)([^)]*)\)"#, options: [.caseInsensitive])
   private static let bracketIssue = try! NSRegularExpression(pattern: #"\s*\(#(\d+)\)"#)
   private static let hashNumber = try! NSRegularExpression(pattern: #"#(\d+)"#)
   private static let storyInBody = try! NSRegularExpression(
@@ -180,7 +180,7 @@ public enum WhatsNew {
     }
     if let m = matches(bracketStories, subject), let story = Int(group(m, 1, subject) ?? "") {
       var text = remove(m, from: subject)
-      var issue = group(m, 2, subject).flatMap { rest in matches(hashNumber, rest).flatMap { group($0, 1, rest) } }
+      var issue = group(m, 0, subject).flatMap { bracket in matches(hashNumber, bracket).flatMap { group($0, 1, bracket) } }
         .flatMap(Int.init)
       if let i = matches(bracketIssue, text) {
         issue = issue ?? group(i, 1, text).flatMap(Int.init)

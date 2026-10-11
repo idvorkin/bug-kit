@@ -106,6 +106,13 @@ For Apple dictation, add `NSSpeechRecognitionUsageDescription` and `NSMicrophone
      "- **Summary:**" form.
    - A commit counts when its subject starts with "Story NNN:", ends with "(story NNN)", names the story in its
      message, or names an issue that a story's Issues line lists.
+     Issue-first brackets also work: `Add the panel (#12; story 007)` and
+     `Fix two things (#12, #13; stories 007, 004)`. The first named story and first issue are used;
+     each story still appears at most once per day.
+   - If all stories live in `docs/stories.md`, pass `--stories "$SRCROOT/docs" --base-url
+     "https://github.com/<owner>/<repo>/blob/main/docs/"`. The folder reader finds every
+     `### User Story NNN:` heading in that file and links to `stories.md#user-story-NNN`.
+     Other Markdown files with no story headings are ignored. `--stories` takes a directory.
    - Without git history it writes an empty feed and never fails the build.
    - The phase reads `.git` and writes into the bundle; the existing recipe sets
      `ENABLE_USER_SCRIPT_SANDBOXING: NO` on the app target.
@@ -247,7 +254,7 @@ let reporter = BugReporter(
 
 Keep report paths relative to this `documents` root. Add `"app_group": "group.com.example.voicekeyboard"` to this app's listener entry; it then pulls the group's `Documents` through `appGroupDataContainer`, including logs and crash evidence. Existing entries without `app_group` still pull the app container. [Listener configuration](ops/listener.md#configure) includes the full entry and backfill commands.
 
-For memory-constrained keyboard extensions, link BugKit into the **host target only**, leave it out of the extension's package dependencies/link phase, and keep the extension's existing minimal evidence writer. The host can read or attach that evidence through its hooks. Do not assume the UIKit reporter is extension-safe: it uses `UIApplication`. Use distinct filenames or process prefixes for host and extension logs; this directory example does not establish cross-process safety for shared log/crash writers. A separate extension-safe product is tracked in [#26](https://github.com/idvorkin/bug-kit/issues/26).
+For memory-constrained keyboard extensions, link BugKit into the **host target only**, leave it out of the extension's package dependencies/link phase, and keep the extension's existing minimal evidence writer. The host can read or attach that evidence through its hooks. The UIKit reporter uses `UIApplication` and is explicitly unavailable in iOS application extensions. The model, store and session logger compile with `APPLICATION_EXTENSION_API_ONLY = YES`; this does not reduce the library's footprint to fit a 20 MB keyboard budget. Use distinct filenames or process prefixes for host and extension logs; this directory example does not establish cross-process safety for shared log/crash writers. See [host-only target setup](extensions.md).
 
 ## Private-text apps
 
@@ -450,6 +457,7 @@ download folder. This live device/cellular test has not been run; it requires Ig
 The package declares watchOS 10 support. The model, local store, writer, logger and CloudKit sender compile
 with the watchOS SDK, allowing think-a-card's watch target to submit directly to the private container without
 waiting for its paired iPhone. Give that watch target its own authorized App ID/profile and the same shared
-container, and call `start()` when the watch app launches or becomes active. This does not add a watch report
-dialog, shake handling, dictation UI, screenshots, or a WatchConnectivity relay, so #25 remains open for those
-integration choices and real watch/cellular validation.
+container, and call `start()` when the watch app launches or becomes active. v0.3.2 adds `WatchBugReportView`
+with system text input and shared local persistence. It does not add phone shake handling, screenshots or a
+WatchConnectivity relay. See [the watch adoption steps](watchos.md) for the form, watch-bundle listener entry,
+crash coverage, fallback limits and the real watch/cellular check Igor still needs to perform.

@@ -50,6 +50,24 @@ jobs:
               -emit-module-path "$out/$1/BugKit.swiftmodule" Sources/BugKit/*.swift
             xcrun --sdk "$1" swiftc -typecheck -swift-version 6 -target "$2" -sdk "$sdk" -I "$out/$1" Tests/Adoption/*.swift
           done
+      - name: Extension-safe model and store consumer
+        run: |
+          set -eu
+          sdk="$(xcrun --sdk iphoneos --show-sdk-path)"
+          out="$RUNNER_TEMP/extension"
+          mkdir -p "$out"
+          xcrun --sdk iphoneos swiftc -emit-module -module-name BugKit -swift-version 6 -application-extension \
+            -target arm64-apple-ios17.0 -sdk "$sdk" -emit-module-path "$out/BugKit.swiftmodule" Sources/BugKit/*.swift
+          xcrun --sdk iphoneos swiftc -typecheck -swift-version 6 -application-extension \
+            -target arm64-apple-ios17.0 -sdk "$sdk" -I "$out" Tests/Adoption/ExtensionAdoption.swift
+          cp Tests/Adoption/ExtensionUIUnavailable.swift.fixture "$out/ExtensionUIUnavailable.swift"
+          if xcrun --sdk iphoneos swiftc -typecheck -swift-version 6 -application-extension \
+            -target arm64-apple-ios17.0 -sdk "$sdk" -I "$out" "$out/ExtensionUIUnavailable.swift" 2>"$out/ui-error.txt"; then
+            echo "Host reporter unexpectedly available to an extension" >&2
+            exit 1
+          fi
+          cat "$out/ui-error.txt"
+          rg "unavailable in application extensions for iOS" "$out/ui-error.txt"
       - name: Headless CloudKit reader compilation
         run: |
           command -v xcodegen >/dev/null || brew install xcodegen

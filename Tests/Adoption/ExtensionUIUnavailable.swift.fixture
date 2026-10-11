@@ -1,0 +1,6 @@
+import BugKit
+
+// Negative consumer: an extension must be unable to construct the host reporter.
+@MainActor func cannotPresentAppUI() {
+  _ = BugReporter(hooks: BugReporterHooks(logger: { _, _ in }))
+}

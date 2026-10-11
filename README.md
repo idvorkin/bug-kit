@@ -2,7 +2,7 @@
 
 Bug reports, session logs and crash evidence for iOS apps, plus opt-in private CloudKit delivery and a Mac listener that pulls reports from CloudKit or paired iPhones and iPads and files them in GitHub, beads or a local inbox.
 
-BugKit requires **iOS 17+**. Its report model, storage and flow also support **macOS 14+**, and the model, store, writer and CloudKit sender compile for **watchOS 10+**; the reporting UI is iOS only. Building the package’s tests requires **Swift 6+** because they use Swift Testing.
+BugKit requires **iOS 17+**. Its report model, storage and flow also support **macOS 14+**. **watchOS 10+** supports the shared model/store/log/crash APIs, CloudKit sender and a system-text-input report form. Building the package’s tests requires **Swift 6+** because they use Swift Testing.
 
 - Shake, tap a button or press ⌘I to report a problem. The dialog captures a screenshot before opening and supports “Log it and another.”
 - Each report carries a UUID, build, typed context, session log path and timestamp. Files stay in the app’s Documents directory; optional CloudKit delivery uploads an immutable evidence copy.
@@ -148,6 +148,9 @@ These commands need no feature flag. Run the listener at least once to populate 
 | Remove a report screenshot | Tap the ✕ on the screenshot in “Attached automatically.” Enabled by default. The choice persists for `.keepMoment`; `.recapture` takes a fresh image. Context stays attached. |
 | Fresh evidence for “Log it and another” | Set `options.another = .recapture`. The default `.keepMoment` reuses the captured screenshot and diagnostics. |
 | App context and extra attachments | Supply the `context` and `extraFiles` hooks; see the [integration example](docs/integration.md). |
+| Foundation context dictionaries | Pin v0.3.2 and convert with `try existingContext.mapValues { try JSONValue(foundation: $0) }`. See [supported values and errors](docs/foundation-context.md). |
+| Apps with a keyboard extension | Link BugKit to the host target only. Model/store APIs compile extension-safe; host presenter APIs are unavailable to extensions. See [target setup](docs/extensions.md). |
+| Watch report form | Pin v0.3.2 and present `WatchBugReportView(session:)` with a `WatchBugReportSession`. Pass optional CloudKit delivery to its writer for direct watch-to-Mac delivery; see [watchOS adoption](docs/watchos.md). |
 | Commit in reports | Set `BugKitCommit` in the app's Info.plist to its build's git commit. |
 | Simulator launch hooks | Set `options.launchHookPrefix = "APP"` and call `reporter.runLaunchHooks()` on appearance. Launch with `SIMCTL_CHILD_APP_BUG="test note" xcrun simctl launch booted <bundle-id>` to save a report. Add `SIMCTL_CHILD_APP_BUG_AFTER=10` for slower cold launches (default 2 seconds), or use `SIMCTL_CHILD_APP_SHAKE_AFTER=2` to open the dialog. |
 | Reset What's new for UI tests | Construct `WhatsNewSeen(launchHookPrefix: "APP", logger: logger)` once in app initialization and pass it to the row. Launch with `SIMCTL_CHILD_APP_WHATS_NEW_RESET=1`. This clears dismissal before the first home render. |

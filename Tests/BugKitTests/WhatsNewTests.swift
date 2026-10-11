@@ -40,7 +40,30 @@ final class WhatsNewTests: XCTestCase {
       .init(story: 181, text: "Gym Timer: RESET on the turned face when paused or finished", issue: 132, leading: false))
     XCTAssertEqual(WhatsNew.parse(subject: "Native app: Box breathing (stories 160-165)")?.story, 160)
     XCTAssertEqual(WhatsNew.parse(subject: "Native app: Box breathing (stories 160-165)")?.text, "Native app: Box breathing")
-    XCTAssertEqual(WhatsNew.parse(subject: "Home: an Exercise Analyzer row (#142, story 134)"), nil)  // story not first
+    XCTAssertEqual(WhatsNew.parse(subject: "Home: an Exercise Analyzer row (#142, story 134)")?.story, 134)
+  }
+
+  func testIssueFirstBracketSubjectsReachTheFeed() {
+    XCTAssertEqual(WhatsNew.parse(subject: "Add the panel (#12; story 007)"),
+                   .init(story: 7, text: "Add the panel", issue: 12, leading: false))
+    XCTAssertEqual(WhatsNew.parse(subject: "Fix two things (#12, #13; stories 007, 004)"),
+                   .init(story: 7, text: "Fix two things", issue: 12, leading: false))
+    let markdown = """
+      ### User Story 007:
+      - **Summary:** The panel
+      ### User Story 004:
+      - **Summary:** Another thing
+      """
+    let stories = WhatsNew.stories(fromMarkdown: markdown, file: "stories.md",
+                                  baseURL: "https://github.com/example/app/blob/main/docs/")
+    let days = WhatsNew.build(commits: [
+      .init(sha: "new", date: at("2026-10-06T17:00:00Z"), subject: "Fix two things (#12, #13; stories 007, 004)"),
+      .init(sha: "older", date: at("2026-10-05T17:00:00Z"), subject: "Add the panel (#12; story 007)")
+    ], stories: stories, now: at("2026-10-06T20:00:00Z"), timeZone: la)
+    XCTAssertEqual(days.flatMap(\.items).map(\.story), [7, 7])
+    XCTAssertEqual(days.flatMap(\.items).map(\.issue), [12, 12])
+    XCTAssertEqual(days[0].items[0].text, "Fix two things")
+    XCTAssertEqual(days[0].items[0].link, "https://github.com/example/app/blob/main/docs/stories.md#user-story-007")
   }
 
   func testBookkeepingAndStorylessSubjectsAreDropped() {
