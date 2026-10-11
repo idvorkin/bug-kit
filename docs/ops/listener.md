@@ -26,6 +26,44 @@ Each app needs:
 Optional: `log_dir` (default `Documents/logs`, for older reports whose `log` is a bare file name) and `crash_dir`
 (default `Documents/crashes`). The top-level `poll_seconds` defaults to 300. Commands below run from the repository root. A dry run still copies files and writes `listener.log`; it leaves tracker, seen-store, inbox and notifications unchanged.
 
+### Local Mac apps
+
+Set `mac_dir` on a Mac app entry to the **storage root containing `bugs.jsonl`**, not its `bugs` subdirectory:
+
+```json
+{
+  "name": "example-mac",
+  "bundle": "com.example.MacApp",
+  "mac_dir": "~/Library/Application Support/com.example.MacApp",
+  "tracker": { "kind": "github", "repo": "owner/mac-app" }
+}
+```
+
+This entry reads the local Mac store instead of trying to pull that bundle from iOS devices. Other entries
+continue polling paired devices. A Mac-only configuration needs no `devicectl` or reachable iPhone/iPad.
+CloudKit intake remains available for the same app and shares its bundle+report-ID delivery receipts.
+
+BugKit's updated Mac defaults use Application Support/<bundle ID>, or the executable name for an unbundled
+app such as `lcd-timer` ([Mac adoption](../integration.md#macos-storage-and-command-line-tools)). For an
+existing custom store, use its actual root instead: Magic Monitor can keep
+`~/Library/Application Support/MagicMonitor`. Reports, screenshots, extra files, logs and crashes are copied
+to `~/tmp/agent/bugs/<name>/mac/` before filing/inbox handoff. The app's source files are never moved or marked.
+`log_dir` and `crash_dir` retain their device defaults; the local lane strips the leading `Documents/`, so
+they resolve to `logs` and `crashes` beneath `mac_dir`. Report evidence paths stay relative to that root.
+Missing required evidence is retried; paths escaping the root and nested evidence symlinks are rejected.
+Listener state and `mac_dir` must not overlap.
+
+First contact baselines existing reports and crashes, just like the device lane. To retire an app's own
+Mac filing script, stop it before handing filing to the listener and preserve both its tracker history and
+the listener's seen/inbox files. Preview `--once --dry-run --backfill` for unfiled old reports, then use
+`--once --backfill` only for history that still needs filing. GitHub UUID markers and shared listener
+receipts prevent refiling; Beads stopgaps that did not write listener receipts need their old history
+baselined instead of blindly backfilled. Magic Monitor can then remove its Mac-only `scripts/file-bugs.sh`.
+Check a newly saved local report reaches both the tracker and inbox once before removing the stopgap.
+
+`mac_store` log events and `status.json.mac_stores` expose root reachability; `doctor` checks local roots
+without filing. A successful Mac-only poll counts as reachable even when no device is paired.
+
 Set `app_group` to an App Group identifier such as `group.com.example.voicekeyboard` when that app stores its evidence in the group's `Documents` directory. Every index, report-folder, log and crash copy then uses `devicectl`'s `appGroupDataContainer` domain with the group identifier. Without it, copies use `appDataContainer` with the bundle ID as before. `bundle` still identifies the app for reports and tracker configuration. The selected group must belong to the installed app and be accessible on the paired device; a wrong group or failed copy leaves evidence pending. The listener does not fall back to the app's private Documents. `scripts/pull-reports.sh` reads the same entry: its `--check`, `bugs.jsonl`, report-folder, log, crash and `pull_extra` copies use the group too.
 
 ```json

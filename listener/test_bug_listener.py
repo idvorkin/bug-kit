@@ -56,6 +56,174 @@ def cloud_summary():
     return {"reachable": 0, "new": 0, "filed": 0, "would_file": 0, "errors": 0, "skipped": 0}
 
 
+@pytest.fixture
+def mac_fixture(listener_state, tmp_path_factory, monkeypatch):
+    root = tmp_path_factory.mktemp("mac-app-store")
+    a = {"name": "fixture", "bundle": "local.fixture", "tracker": {"kind": "none"},
+         "mac_dir": str(root), "log_dir": "Documents/logs", "crash_dir": "Documents/crashes"}
+    cfg = {"apps": [a], "poll_seconds": 60}
+    filer = CloudFakeFiler()
+    monkeypatch.setattr(bl, "Filer", lambda: filer)
+    def no_devices():
+        raise AssertionError("Mac-only configuration must not query devices")
+    monkeypatch.setattr(bl, "list_devices", no_devices)
+    return cfg, root, filer
+
+
+def write_mac_report(root, identity=None, **changes):
+    rec = {"id": identity or str(uuid.uuid4()).upper(), "bundle": "local.fixture", "app": "fixture",
+           "note": "fixture note", "reported_at": "2026-10-11T00:00:00Z", "folder": "bugs/sample",
+           "files": ["bugs/sample/extra.txt"], "screenshot": "bugs/sample/screen.png", "log": "logs/session.jsonl"}
+    rec.update(changes)
+    (root / "bugs/sample").mkdir(parents=True, exist_ok=True)
+    (root / "logs").mkdir(exist_ok=True)
+    (root / "bugs/sample/screen.png").write_bytes(b"synthetic screen")
+    (root / "bugs/sample/extra.txt").write_text("synthetic evidence")
+    (root / "logs/session.jsonl").write_text('{"type":"session_start","started":"2026-10-10T00:00:00Z"}\n')
+    with (root / "bugs.jsonl").open("a") as f:
+        f.write(json.dumps(rec) + "\n")
+    return rec
+
+
+def test_local_mac_baselines_then_delivers_new_reports_once(mac_fixture, listener_state):
+    cfg, root, filer = mac_fixture
+    old = write_mac_report(root)
+    assert bl.poll(cfg, False)["baselined"] == 1
+    rec = write_mac_report(root)
+    with (root / "bugs.jsonl").open("a") as f:
+        f.write(json.dumps(rec) + "\n")
+    result = bl.poll(cfg, False)
+    assert result["reachable"] == 1 and result["devices"] == 0 and result["errors"] == 0
+    assert [key for key, _ in filer.calls] == [rec["id"]]
+    item = json.loads(bl.INBOX.read_text())
+    assert item["device"] == "mac" and item["key"] == rec["id"]
+    snapshot = Path(item["dir"])
+    assert (snapshot / rec["screenshot"]).read_bytes() == b"synthetic screen"
+    assert (snapshot / rec["files"][0]).read_text() == "synthetic evidence"
+    assert (root / rec["screenshot"]).read_bytes() == b"synthetic screen"
+    assert bl.poll(cfg, False)["filed"] == 0
+    assert len(filer.calls) == 1
+    assert bl.read_status()["mac_stores"] == [{"app": "fixture", "reachable": True}]
+    assert old["id"] not in [key for key, _ in filer.calls]
+
+
+def test_local_mac_missing_evidence_retries_without_losing_report(mac_fixture):
+    cfg, root, filer = mac_fixture
+    rec = write_mac_report(root)
+    (root / rec["log"]).unlink()
+    result = bl.poll(cfg, True)
+    assert result["errors"] == 1 and not filer.calls
+    entry = bl.load_seen()["local.fixture|local-mac"]
+    assert entry["pending"][rec["id"]]["reason"] == "evidence"
+    (root / rec["log"]).write_text("restored session\n")
+    assert bl.poll(cfg, False)["filed"] == 1
+    assert len(filer.calls) == 1 and not bl.load_seen()["local.fixture|local-mac"]["pending"]
+
+
+def test_local_mac_crashes_without_index_and_renamed_files_dedupe(mac_fixture):
+    cfg, root, filer = mac_fixture
+    crashes = root / "crashes"
+    crashes.mkdir()
+    crash = crashes / "signal-1791590460.txt"
+    crash.write_text("signal 11\nframe 0\n")
+    first = bl.poll(cfg, True)
+    assert first["crashes"] == 1 and first["filed"] == 1 and first["errors"] == 0
+    crash.rename(crashes / "signal-1791590460.reported.txt")
+    assert bl.poll(cfg, False)["crashes"] == 0
+    assert len(filer.calls) == 1 and len(bl.INBOX.read_text().splitlines()) == 1
+    assert (crashes / "signal-1791590460.reported.txt").exists()
+
+
+def test_local_mac_and_cloud_share_report_receipts(mac_fixture, listener_state):
+    cfg, root, filer = mac_fixture
+    rec = write_mac_report(root)
+    assert bl.poll(cfg, True)["filed"] == 1
+    cloud_cfg, cloud_rec, _ = cloud_fixture(listener_state)
+    cloud_folder = Path(cloud_cfg["cloudkit"]["inbox"]) / cloud_rec["id"]
+    cloud_folder.rename(cloud_folder.with_name(rec["id"]))
+    cloud_folder = cloud_folder.with_name(rec["id"])
+    cloud_rec["id"] = rec["id"]
+    (cloud_folder / "report.json").write_text(json.dumps(cloud_rec))
+    bl.poll_cloud_reports(cloud_cfg, bl.load_seen(), filer, cloud_summary(), False)
+    assert len(filer.calls) == 1 and len(bl.INBOX.read_text().splitlines()) == 1
+
+
+def test_cloud_receipt_prevents_local_mac_backfill_duplicate(mac_fixture, listener_state):
+    cfg, root, filer = mac_fixture
+    cloud_cfg, rec, _ = cloud_fixture(listener_state)
+    bl.poll_cloud_reports(cloud_cfg, {}, filer, cloud_summary(), False)
+    write_mac_report(root, identity=rec["id"])
+    result = bl.poll(cfg, True)
+    assert result["skipped"] == 1 and result["filed"] == 0
+    assert len(filer.calls) == 1 and len(bl.INBOX.read_text().splitlines()) == 1
+
+
+def test_local_mac_delivery_survives_broken_device_discovery(mac_fixture, monkeypatch):
+    cfg, root, filer = mac_fixture
+    write_mac_report(root)
+    cfg["apps"].append({"name": "remote", "bundle": "local.remote", "tracker": {"kind": "none"}})
+    def broken_devices():
+        raise RuntimeError("simulated device discovery failure")
+    monkeypatch.setattr(bl, "list_devices", broken_devices)
+    result = bl.poll(cfg, True)
+    assert result["filed"] == 1 and result["errors"] == 1 and len(filer.calls) == 1
+    assert len(bl.INBOX.read_text().splitlines()) == 1
+
+
+def test_local_mac_retries_inbox_append_without_refiling(mac_fixture):
+    cfg, root, filer = mac_fixture
+    rec = write_mac_report(root)
+    bl.INBOX.mkdir()  # a directory cannot be opened as an append-only inbox file
+    assert bl.poll(cfg, True)["errors"] == 1
+    assert len(filer.calls) == 1
+    assert bl.load_seen()["_deliveries"]["local.fixture:" + rec["id"]]["inbox"] is False
+    bl.INBOX.rmdir()
+    assert bl.poll(cfg, False)["errors"] == 0
+    assert len(filer.calls) == 1 and json.loads(bl.INBOX.read_text())["key"] == rec["id"]
+
+
+def test_local_mac_doctor_needs_no_xcode_tools(mac_fixture, listener_state, monkeypatch):
+    cfg, _, _ = mac_fixture
+    config = listener_state / "apps.json"
+    config.write_text(json.dumps(cfg))
+    monkeypatch.setattr(bl.shutil, "which", lambda _: None)
+    result = bl.doctor_checks(config)
+    checks = {c["check"]: c for c in result["checks"]}
+    assert result["ok"] and checks["mac_store:fixture"]["state"] == "ok"
+    assert checks["devicectl"]["detail"] == "not required for local Mac stores"
+
+
+@pytest.mark.parametrize("escape", ["traversal", "symlink"])
+def test_local_mac_rejects_evidence_that_escapes_store(mac_fixture, listener_state, escape):
+    cfg, root, filer = mac_fixture
+    rec = write_mac_report(root, **({"folder": "../outside"} if escape == "traversal" else {}))
+    if escape == "symlink":
+        (root / "bugs/sample/escape").symlink_to(listener_state, target_is_directory=True)
+    result = bl.poll(cfg, True)
+    assert result["errors"] == 1 and not filer.calls and not bl.INBOX.exists()
+    assert not (listener_state / "fixture/outside").exists()
+    assert rec["id"] in bl.load_seen()["local.fixture|local-mac"]["pending"]
+
+
+def test_local_mac_dry_run_leaves_delivery_state_untouched(mac_fixture, monkeypatch):
+    cfg, root, filer = mac_fixture
+    write_mac_report(root)
+    monkeypatch.setattr(bl, "DRY", True)
+    monkeypatch.setattr(filer, "file", lambda *args: ("would_file", "fixture"))
+    result = bl.poll(cfg, True)
+    assert result["would_file"] == 1
+    assert not bl.SEEN.exists() and not bl.INBOX.exists() and not (bl.STATE / "status.json").exists()
+
+
+def test_local_mac_config_rejects_relative_and_overlapping_roots(listener_state):
+    config = listener_state / "apps.json"
+    a = {"name": "fixture", "bundle": "local.fixture"}
+    for invalid in ["relative/path", "", str(listener_state), str(listener_state / "nested")]:
+        config.write_text(json.dumps({"apps": [{**a, "mac_dir": invalid}]}))
+        with pytest.raises(ValueError, match="mac_dir"):
+            bl.load_config(config)
+
+
 def test_cloud_reports_file_once_and_dedupe_later_device_delivery(listener_state):
     cfg, rec, evidence = cloud_fixture(listener_state)
     filer = CloudFakeFiler()

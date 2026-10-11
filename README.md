@@ -6,7 +6,7 @@ BugKit requires **iOS 17+**. Its report model, storage and flow also support **m
 
 - Shake, tap a button or press ⌘I to report a problem. The dialog captures a screenshot before opening and supports “Log it and another.”
 - Each report carries a UUID, build, typed context, session log path and timestamp. Files stay in the app’s Documents directory; optional CloudKit delivery uploads an immutable evidence copy.
-- The listener polls every reachable paired iPhone and iPad, files reports once and names local screenshot paths without uploading images.
+- The listener polls paired iPhones/iPads and configured local Mac stores, files reports once and names local screenshot paths without uploading images. Set an app's `mac_dir` to its storage root; see [local Mac configuration](docs/ops/listener.md#local-mac-apps).
 - An optional What's new feed connects git commits to user stories and shows recent changes on iOS and macOS.
 
 Extracted from Exercise Analyzer, Context Grabber and Magic Monitor so shared fixes reach every app.
