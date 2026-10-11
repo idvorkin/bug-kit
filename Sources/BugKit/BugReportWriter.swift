@@ -91,7 +91,7 @@ public struct BugReportWriter: Sendable {
     self.delivery = delivery
   }
 
-  /// `log`: the session log's path under Documents and the milliseconds since it began, from the app.
+  /// `log`: the session log's path under the storage root and the milliseconds since it began, from the app.
   /// `copySessionLog`: overrides the writer's own setting for this report; nil keeps it.
   public func save(
     note: String, screen: String, context: [String: JSONValue], screenshotPNG: Data?,

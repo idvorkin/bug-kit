@@ -61,7 +61,7 @@ public final class BugStore: @unchecked Sendable {
     return (reports, skipped)
   }
 
-  /// Creates the report's folder and returns its path relative to Documents (`bugs/20261010-153000`) and its URL.
+  /// Creates the report's folder and returns its path relative to the storage root (`bugs/20261010-153000`) and its URL.
   /// The create itself is the test for "taken" (no `withIntermediateDirectories` on the last step), so two
   /// reports in one second, from two threads or two processes, never share a folder.
   public func makeFolder(for date: Date) throws -> (relative: String, url: URL) {

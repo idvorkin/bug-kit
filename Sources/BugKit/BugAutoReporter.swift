@@ -24,7 +24,7 @@ public actor BugAutoReporter {
   public let writer: BugReportWriter
   public let options: BugAutoReportOptions
   private let now: @Sendable () -> Date
-  /// The last report per reason, kept in `Documents/bugs-auto.json` so a relaunch loop is limited too.
+  /// The last report per reason, kept in `bugs-auto.json` under the storage root so a relaunch loop is limited too.
   private var last: [String: Date]
   private var stateFile: URL { writer.store.documents.appendingPathComponent("bugs-auto.json") }
 

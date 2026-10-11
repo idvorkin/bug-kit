@@ -32,7 +32,7 @@ public enum LogRetention {
 }
 
 extension BugStore {
-  /// Deletes `*.jsonl` in `logs` (default `Documents/logs`) older than `retention`, or past the newest `keepNewest`,
+  /// Deletes `*.jsonl` in `logs` (default `<storage root>/logs`) older than `retention`, or past the newest `keepNewest`,
   /// except logs a report names. Logs one `logs_pruned` event even when nothing went (count, bytes,
   /// kept_for_reports). A bugs.jsonl that exists but cannot be read means the reported logs are unknown, so nothing
   /// is pruned (an `error` says so). A file whose age cannot be read is never deleted. Run it at launch, after the

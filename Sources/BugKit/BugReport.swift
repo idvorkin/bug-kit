@@ -1,10 +1,10 @@
 import Foundation
 
-/// One bug report: one line of `Documents/bugs.jsonl`. The fixed fields are the same in every app, so one listener
+/// One bug report: one line of `bugs.jsonl` in the storage root. The fixed fields are the same in every app, so one listener
 /// and one filer read them all; what differs per app goes in `context`.
 ///
 /// On disk the keys are snake_case (`reported_at`, `session_t_ms`) and `reported_at` is ISO 8601 UTC with
-/// milliseconds. The paths (`log`, `screenshot`, `folder`, `files`) are relative to the app's Documents folder.
+/// milliseconds. The paths (`log`, `screenshot`, `folder`, `files`) are relative to the storage root.
 public struct BugReport: Codable, Equatable, Identifiable, Sendable {
   /// The report's key everywhere: the seen-store, the issue marker, the inbox. Older reports (EA, CG before BugKit)
   /// have no id and are keyed by `reported_at`.
@@ -21,7 +21,7 @@ public struct BugReport: Codable, Equatable, Identifiable, Sendable {
   /// The screen the report was made from, as the app names it.
   public var screen: String
   public var note: String
-  /// The session log's path under Documents (`logs/swing-20261008-052700.jsonl`), so a reader jumps from the report
+  /// The session log's path under the storage root (`logs/swing-20261008-052700.jsonl`), so a reader jumps from the report
   /// to the log; nil when the app has none.
   public var log: String?
   /// Milliseconds since the session log began: the moment, so `jq 'select(.t > N-3000 and .t < N+3000)'` lands on it.
