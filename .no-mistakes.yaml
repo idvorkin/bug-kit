@@ -11,27 +11,18 @@ commands:
 # Keep Test focused on the change. The complete regression suite runs in CI.
 test:
   instructions: |
-    BugKit requires macOS with Xcode and Swift 6+, plus uv for Python tests.
-    Only one simulator on this Mac at a time: before booting, check xcrun simctl list devices booted and wait until it's empty; shut yours down when done.
-    Only one build or simulator on this Mac at a time. The outer driver holds
-    ~/tmp/agent/locks/build.lock for this run: do not reacquire it in nested commands.
-    Standalone heavy commands outside such a run need an explicit build turn and
-    lockf -k -t 3600 ~/tmp/agent/locks/build.lock <command>.
-    Signing builds must run sequentially under
-    lockf -k -t 900 ~/tmp/agent/locks/xcode-signing.lock xcodebuild ... -allowProvisioningUpdates.
-    Select behavioral tests relevant to the change:
-      swift test --filter <test-name>
+    Host rung only: run the touched module's host tests (swift test --filter / jest / pytest) and read the diff.
+    Do not build for, create, or boot a simulator, and do not run xcodebuild against a simulator or device;
+    the driving session owns live evidence under the build turn. List what only the simulator or phone can show
+    as "to verify live" in the report. Do not re-run `just test`: the gate already ran it.
+    BugKit host commands use Swift 6+ and uv:
+      swift test --jobs 2 --filter <test-name>
       uv run --python 3.12 --with typer --with pytest pytest --import-mode=importlib listener/ Tests/ scripts/tests/ -k <case> -q
-    For CloudKit adoption snippets, compile Tests/Adoption/*.swift against BugKit as the
-    CI step "iOS and watchOS compilation with the documented adoption snippets" does.
-    For UIKit or SwiftUI changes, also typecheck Sources/BugKit/*.swift with
-    xcrun --sdk iphoneos swiftc -typecheck -swift-version 6 -target arm64-apple-ios17.0
-    -sdk "$(xcrun --sdk iphoneos --show-sdk-path)" Sources/BugKit/*.swift
-    For interaction/accessibility behavior, run scripts/test-ios-diagnostics.sh
-    with an available simulator UDID (requires XcodeGen). Report separately what
-    was verified on host, simulator and physical device. Do not file real issues,
-    send notifications or deploy to paired devices as part of tests; listener
-    and deployment tests provide fake tools for those effects.
+    The outer driver holds ~/tmp/agent/locks/build.lock: do not reacquire it in nested commands.
+    Run heavy host commands one at a time. Do not file real issues, send notifications, or deploy to devices;
+    listener and deployment tests use fake tools for those effects.
+    Live simulator and device checks happen once in the driving session's build turn and are recorded in the PR body.
+    Only one simulator on this Mac at a time: before booting, check xcrun simctl list devices booted and wait until it's empty; shut yours down when done.
 
 document:
   instructions: |
