@@ -144,7 +144,12 @@ public struct WhatsNewSeen: @unchecked Sendable {
             seen.dismiss(feed, logger: logger)
             dismissed = true
           } label: {
-            Image(systemName: "xmark").font(.footnote.weight(.semibold))
+            Image(systemName: "xmark.circle.fill")
+              .symbolRenderingMode(.palette)
+              .foregroundStyle(Color.white, Color.black)
+              .font(.title2.weight(.semibold))
+              .frame(minWidth: 44, minHeight: 44)
+              .contentShape(Rectangle())
           }
           .buttonStyle(.borderless)
           .accessibilityLabel("Hide What's new until the next change")

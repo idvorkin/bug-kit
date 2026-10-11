@@ -179,6 +179,11 @@ For a custom UIKit flow, `AccessibilitySnapshot.capture(view)` exposes the same 
 
 ### Reset What's new before UI tests
 
+`WhatsNewRow` includes a larger black-and-white dismiss symbol with a minimum 44×44-point hit area, so
+the ✕ stays visible on light rows and dark video overlays. Apps get it by updating BugKit; no new option is
+required. The VoiceOver label and `whats-new-dismiss` identifier are unchanged. When adopting it, check the
+row over the app's actual light/dark backgrounds and tap near the edges of the dismiss hit area.
+
 Create and retain `WhatsNewSeen(launchHookPrefix: "GRABBER", logger: logger)` in app initialization, before the home view first calls `showsRow`. Pass that same store to `WhatsNewRow`. CG tests can then launch with `GRABBER_WHATS_NEW_RESET=1` in `XCUIApplication.launchEnvironment` (or `SIMCTL_CHILD_GRABBER_WHATS_NEW_RESET=1` with simctl). Other apps substitute their prefix. Only the exact value `1` enables the hook.
 
 The initializer synchronously clears `bugkit.whats_new_seen` and logs `bug_hook` with `whats_new_reset: true`. Custom defaults suites and keys are respected. Construct the store once per launch; recreating it during view rendering would reset a dismissal made during that launch. `reporter.runLaunchHooks()` handles report/shake hooks; it does not reset this store. Remove CG's manual plist deletion workaround after adopting this initializer.
