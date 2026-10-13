@@ -2,7 +2,14 @@ import Foundation
 
 /// An optional delivery queue. Called after the local report has been saved; enqueue must not await a network.
 public protocol BugReportDelivery: Sendable {
+  /// Establish durable activation before a writer can append a report. Never waits for a network.
+  func prepare(documents: URL) async throws
   func enqueue(_ report: BugReport, documents: URL) async throws
+}
+
+extension BugReportDelivery {
+  /// Existing delivery adapters without an opt-in boundary need no preparation.
+  public func prepare(documents: URL) async throws {}
 }
 
 /// The immutable wire payload carried by a CloudKit asset. Paths remain relative to the storage root.
@@ -151,6 +158,13 @@ actor CloudReportOutbox: BugReportDelivery {
        }) {
     self.store = store; self.root = root; self.transport = transport; self.logger = logger
     self.sleep = sleep
+  }
+
+  func prepare(documents: URL) throws {
+    guard documents.standardizedFileURL == store.documents.standardizedFileURL else {
+      throw CloudDeliveryError.wrongStore
+    }
+    _ = try preexistingReports()
   }
 
   func enqueue(_ report: BugReport, documents: URL) async throws {

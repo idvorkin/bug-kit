@@ -323,6 +323,7 @@ UDIDs, emails or account identifiers.
 ```swift
 let delivery = CloudKitReportDelivery(
   containerIdentifier: "iCloud.com.example.BugKitReports", store: store, logger: log.logger)
+try await delivery.prepare(documents: store.documents) // before exposing any report UI
 let reporter = BugReporter(
   hooks: BugReporterHooks(sessionLog: { log.position }, logger: log.logger, flushLog: { log.flush() }),
   options: options, store: store, info: info, delivery: delivery)
@@ -332,6 +333,7 @@ Task { await delivery.start() } // launch; repeat on foreground
 For a watch or Foundation-only caller:
 
 ```swift
+try await delivery.prepare(documents: store.documents) // before exposing a writer
 let writer = BugReportWriter(store: store, info: info, logger: log.logger, delivery: delivery)
 let report = await writer.save(note: note, screen: "watch", context: [:], screenshotPNG: nil,
                                log: log.position, extraFiles: nil)
@@ -348,12 +350,14 @@ entitlements files. Do not copy a signature's generated team-prefixed entitlemen
 The app owns the opt-in preference: construct/pass delivery only when enabled. `stop()` stops
 app-level retry timers; an already submitted CloudKit daemon operation may still finish.
 
-**Only reports saved after opt-in are delivered.** The first `start()` or `enqueue` records the IDs already in
-`bugs.jsonl` as pre-opt-in history; those stay local for the device pull and are never uploaded. Every later
+**Only reports saved after opt-in are delivered.** Await `prepare(documents:)` before exposing the reporter or
+writer: it durably records activation without contacting iCloud. The writer also prepares before any local
+report work, protecting the first save even if the launch `Task` has not run. The first preparation records
+the IDs already in `bugs.jsonl` as pre-opt-in history; those stay local for the device pull and are never uploaded. Every later
 report is eligible by ID, not by its timestamp: if the app dies between saving and enqueueing, or evidence
-cannot be staged yet, the next `start()` or save stages it again. Call `start()` at launch so the boundary is
-recorded before the user can save. The boundary is recorded once per store and container: if the app later
-turns delivery off and back on, reports saved while it was off are uploaded too.
+cannot be staged yet, the next `start()` or save stages it again. Call `start()` at launch/foreground for
+automatic retries; scheduling a launch `Task` alone does not establish the opt-in boundary. The boundary is
+recorded once per store and container: if the app later turns delivery off and back on, reports saved while it was off are uploaded too.
 
 Saving completes locally before a network request. The immutable outbox lives below
 the store root at `bug-delivery/cloudkit-<container-hash>/`. Uploads explicitly allow cellular, use user-initiated QoS,

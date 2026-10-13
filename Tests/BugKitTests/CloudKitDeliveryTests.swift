@@ -123,6 +123,63 @@ private actor RejectingDelivery: BugReportDelivery {
   func wasCalled() -> Bool { called }
 }
 
+/// Simulates termination after local append: no enqueue reaches the outbox or starts a retry.
+private struct InterruptedCloudDelivery: BugReportDelivery {
+  let queue: CloudReportOutbox
+  func prepare(documents: URL) async throws { try await queue.prepare(documents: documents) }
+  func enqueue(_ report: BugReport, documents: URL) async throws {
+    throw CloudDeliveryError.accountUnavailable
+  }
+}
+
+@Test func firstOptInSaveRecoversAfterTerminationBeforeEnqueueWithoutLaunchTask() async throws {
+  let f = CloudFixture(); defer { f.clean() }
+  let transport = FakeCloudTransport()
+  let history = try f.report(); try f.store.append(history)
+  let writer = BugReportWriter(store: f.store,
+    info: BugAppInfo(app: "fixture", bundle: "local.fixture", build: "1", commit: "fixture", device: "synthetic"),
+    logger: { _, _ in }, delivery: InterruptedCloudDelivery(queue: f.outbox(transport)))
+  // No start/flush launch Task has run. The writer must establish the boundary before append.
+  let report = await writer.save(note: "first opted-in report", screen: "home", context: [:],
+                                 screenshotPNG: nil, log: nil, extraFiles: nil)
+  #expect(await transport.count() == 0)
+  let restarted = f.outbox(transport)
+  #expect(try await restarted.flush() == 1)
+  #expect(await transport.data(report.id) != nil)
+  #expect(await transport.data(history.id) == nil)
+  #expect(try f.store.readAll().reports.map(\.id) == [history.id, report.id])
+}
+
+@Test func optInPreparationDoesNotWaitForAnAvailableCloudAccount() async throws {
+  let f = CloudFixture(); defer { f.clean() }
+  let transport = FakeCloudTransport()
+  let history = try f.report(); try f.store.append(history)
+  let queue = f.outbox(transport)
+  try await queue.prepare(documents: f.documents)
+  #expect(await transport.checks() == 0)
+  let report = try f.report(); try f.store.append(report)
+  #expect(try await f.outbox(transport).flush() == 1)
+  #expect(await transport.data(history.id) == nil)
+  #expect(await transport.data(report.id) != nil)
+}
+
+private struct PreparationFailure: BugReportDelivery {
+  func prepare(documents: URL) async throws { throw CloudDeliveryError.wrongStore }
+  func enqueue(_ report: BugReport, documents: URL) async throws { throw CloudDeliveryError.wrongStore }
+}
+
+@Test func failedDeliveryPreparationStillSavesLocalReport() async throws {
+  let f = CloudFixture(); defer { f.clean() }
+  let events = CloudEvents()
+  let writer = BugReportWriter(store: f.store,
+    info: BugAppInfo(app: "fixture", bundle: "local.fixture", build: "1", commit: "fixture", device: "synthetic"),
+    logger: events.logger, delivery: PreparationFailure())
+  let report = await writer.save(note: "local fallback", screen: "home", context: [:],
+                                 screenshotPNG: nil, log: nil, extraFiles: nil)
+  #expect(try f.store.readAll().reports == [report])
+  #expect(events.all.contains { $0.0 == "error" && $0.1["where"] == .string("bug_delivery_prepare") })
+}
+
 @Test func cloudDeliveryFailureDoesNotLoseLocalWriterReport() async throws {
   let f = CloudFixture(); defer { f.clean() }
   let delivery = RejectingDelivery()

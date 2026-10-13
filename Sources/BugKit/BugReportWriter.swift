@@ -99,6 +99,15 @@ public struct BugReportWriter: Sendable {
     diagnostics: BugDiagnosticsSnapshot = BugDiagnosticsSnapshot(), source: String? = nil,
     reason: String? = nil, event: String = "bug_report", copySessionLog: Bool? = nil, screenshotDropped: Bool = false
   ) async -> BugReport {
+    // This must precede all report work, especially append: a launch Task may not have run yet,
+    // and termination after append must not classify this report as pre-opt-in on restart.
+    if let delivery {
+      do { try await delivery.prepare(documents: store.documents) }
+      catch {
+        logger("error", ["where": "bug_delivery_prepare",
+                         "message": "Cloud delivery activation failed; saving the report locally."])
+      }
+    }
     var report = BugReport(
       reportedAt: date, app: info.app, bundle: info.bundle, build: info.build, commit: info.commit,
       device: info.device, screen: screen, note: note, log: log?.path, sessionTMs: log?.tMs, folder: "",

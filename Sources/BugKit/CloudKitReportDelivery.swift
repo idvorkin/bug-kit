@@ -15,6 +15,11 @@ public actor CloudKitReportDelivery: BugReportDelivery {
       transport: NativeCloudReportTransport(containerIdentifier: containerIdentifier), logger: logger)
   }
 
+  /// Persist activation before exposing a writer/reporter; no iCloud request or permission is needed.
+  public func prepare(documents: URL) async throws {
+    try await outbox.prepare(documents: documents)
+  }
+
   public func enqueue(_ report: BugReport, documents: URL) async throws {
     try await outbox.enqueue(report, documents: documents)
   }
