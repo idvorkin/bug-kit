@@ -154,11 +154,14 @@ def load_seen() -> dict:
 
 def recover_deliveries(seen: dict) -> dict:
     if INBOX.is_file():
-        by_name = {}  # populated during poll, where the app's bundle is known
+        by_name = {}  # legacy lines did not persist a bundle identifier
         for line in INBOX.read_text().splitlines():
             try:
                 item = json.loads(line)
-                if item.get("key") and item.get("app"):
+                if item.get("key") and item.get("bundle"):
+                    seen.setdefault("_deliveries", {})[item["bundle"] + ":" + item["key"]] = {
+                        "ref": item.get("ref"), "inbox": True}
+                elif item.get("key") and item.get("app"):
                     by_name[item["app"] + ":" + item["key"]] = {"ref": item.get("ref")}
             except (ValueError, AttributeError, TypeError):
                 continue
@@ -580,7 +583,7 @@ def deliver(filer: Filer, a: dict, rec: dict, dev: dict, local: Path, entry: dic
             pending(entry, {**rec, "id": key}, "inbox", a, dev)
             save_seen(seen)  # retain tracker acknowledgement even when the inbox append fails
         with INBOX.open("a") as f:
-            f.write(json.dumps({"t": now(), "app": a["name"], "repo": a.get("repo"), "device": dev["dir"],
+            f.write(json.dumps({"t": now(), "app": a["name"], "bundle": a["bundle"], "repo": a.get("repo"), "device": dev["dir"],
                                 "key": key, "kind": rec.get("kind", "report"), "reported_at": rec.get("reported_at"),
                                 "note": rec.get("note"), "tracker": a["tracker"]["kind"], "ref": ref,
                                 "dir": str(local)}, ensure_ascii=False) + "\n")

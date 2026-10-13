@@ -688,6 +688,45 @@ def test_inbox_history_prevents_duplicate_after_seen_store_loss(listener_state):
     assert len(bl.INBOX.read_text().splitlines()) == 1
 
 
+def test_inbox_bundle_receipts_survive_renamed_app_and_seen_store_loss(listener_state):
+    cfg, rec, _ = cloud_fixture(listener_state)
+    filer = CloudFakeFiler()  # cannot look up an existing issue, like an inbox/Beads tracker
+    bl.poll_cloud_reports(cfg, {}, filer, cloud_summary(), False)
+    receipt = json.loads(bl.INBOX.read_text())
+    assert receipt["bundle"] == rec["bundle"]
+    cfg["apps"][0]["name"] = "renamed-fixture"
+    bl.SEEN.unlink()
+    seen = bl.load_seen()
+    summary = cloud_summary()
+    bl.poll_cloud_reports(cfg, seen, filer, summary, False)
+    assert len(filer.calls) == 1
+    assert summary["skipped"] == 1
+    assert len(bl.INBOX.read_text().splitlines()) == 1
+    # Recovery also dedupes a subsequent device pull under the new display name.
+    assert bl.already_filed(filer, cfg["apps"][0], rec, {"dir": "phone"}, {"keys": []},
+                            "keys", seen, cloud_summary())
+
+
+def test_bundle_receipt_does_not_suppress_another_bundle_with_same_display_name(listener_state):
+    cfg, rec, _ = cloud_fixture(listener_state)
+    bl.INBOX.write_text(json.dumps({"app": "fixture", "bundle": "local.other",
+                                   "key": rec["id"], "ref": "other-ref"}) + "\n")
+    filer = CloudFakeFiler()
+    seen = bl.load_seen()
+    assert not bl.already_filed(filer, cfg["apps"][0], rec, {"dir": "phone"}, {"keys": []},
+                                "keys", seen, cloud_summary())
+
+
+def test_legacy_inbox_lines_still_recover_by_name(listener_state):
+    cfg, rec, _ = cloud_fixture(listener_state)
+    bl.INBOX.write_text(json.dumps({"app": "fixture", "key": rec["id"], "ref": "legacy-ref"}) + "\n")
+    seen = bl.load_seen()
+    filer = CloudFakeFiler()
+    assert bl.already_filed(filer, cfg["apps"][0], rec, {"dir": "phone"}, {"keys": []},
+                            "keys", seen, cloud_summary())
+    assert not filer.calls
+
+
 def test_tracker_acknowledgement_survives_failed_inbox_append_and_retries_without_refiling(listener_state, monkeypatch):
     cfg, rec, _ = cloud_fixture(listener_state)
     filer, seen = CloudFakeFiler(), {}

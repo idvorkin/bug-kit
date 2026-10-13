@@ -171,7 +171,9 @@ and `devices_error`, then the existing `file` and new `inbox` event for each suc
 have no first-contact baseline: apps upload only reports saved after opt-in, so the configured apps' first
 reports are filed immediately. Unknown app bundles
 are retained locally until configured. Delivery receipts are shared with device pulls by bundle + UUID; local
-inbox history recovers receipts after a lost seen-store write. A failed inbox append leaves an `inbox` pending
+inbox history recovers receipts after a lost seen-store write. New inbox lines retain the stable `bundle`
+identifier, so changing an app's configured display name does not refile its reports after recovery. Older
+lines without `bundle` retain name-based recovery and require the original configured name. A failed inbox append leaves an `inbox` pending
 reason and retries without filing another issue. Do not delete receipts, download folders or cloud records as
 routine cleanup.
 
