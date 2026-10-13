@@ -44,16 +44,24 @@ The SwiftPM path depends on `-derivedDataPath`: EA's is `Build/`, CG's is `nativ
 
 no-mistakes is a local gate that takes committed work on a feature branch through these steps: intent, rebase, review, test, document, lint, push, PR, CI. Each repo configures it in `.no-mistakes.yaml` on main.
 
-How the apps configure it:
-- **Each app:** `commands.test: "just test"` (the host rung, about 1 s) and `no_ci: true`.
-- **CG:** `protected_paths` keeps auto-fix commits off the native surface. Its test instructions say: no simulator, no deploy, name the rung, and list what only the phone can show.
+The local Test step is host-only: run the touched module's targeted host tests and read the diff. The full
+regression suite runs once in CI. Repositories with no CI workflows may use `no_ci: true`; BugKit has CI.
+Do not run the full `just test` immediately before the gate, or repeat live checks inside it.
+
+The driving session owns simulator/device checks, performs them once during its explicit build turn,
+and records the evidence and remaining physical-device checks in the PR body. The Test agent must not
+boot a simulator, run xcodebuild, deploy, or file real reports. Run heavy commands under
+`lockf -k -t 3600 ~/tmp/agent/locks/build.lock`; if an outer driver already holds that lock, do not
+reacquire it in nested commands. Signing builds also take the signing lock described in `AGENTS.md`.
 
 Gotchas from runs on 2026-10-07:
 - **`axi status` reports only the checked-out branch.** After a branch switch use `axi status --run <id>`. A watcher left polling `status` looped for an hour.
 - **`axi run` and `axi respond` return after an 8-minute hold** with `error: wait … elapsed`. That is not a failure: run them in the background and reattach.
 - **"Test agent exceeded its invocation budget"** is a cut, not a test failure.
 - **The pipeline refuses to start while untracked files are in the tree.** Put other agents' folders in `.git/info/exclude`.
-- **A run keeps its own test simulator and xcodebuild alive.** Pause or cancel it when the Mac is slow (mac-driver).
+- **A current run does not own a test simulator or xcodebuild.** Live tests belong to the driving session,
+  separately from the host-only gate. Use status/logs to identify the active step; do not interrupt a
+  healthy pipeline merely because the Mac is slow, or restart the daemon while runs are active.
 
 ## One agent, one simulator, at a time
 
