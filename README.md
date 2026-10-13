@@ -151,6 +151,7 @@ These commands need no feature flag. Run the listener at least once to populate 
 | Commit in reports | Set `BugKitCommit` in the app's Info.plist to its build's git commit. |
 | Simulator launch hooks | Set `options.launchHookPrefix = "APP"` and call `reporter.runLaunchHooks()` on appearance. Launch with `SIMCTL_CHILD_APP_BUG="test note" xcrun simctl launch booted <bundle-id>` to save a report. Add `SIMCTL_CHILD_APP_BUG_AFTER=10` for slower cold launches (default 2 seconds), or use `SIMCTL_CHILD_APP_SHAKE_AFTER=2` to open the dialog. |
 | Reset What's new for UI tests | Construct `WhatsNewSeen(launchHookPrefix: "APP", logger: logger)` once in app initialization and pass it to the row. Launch with `SIMCTL_CHILD_APP_WHATS_NEW_RESET=1`. This clears dismissal before the first home render. |
+| About / version | Add `BugKitAboutLink()` inside Settings navigation; set build Info.plist keys `BugKitCommit` and `BugKitRepositoryURL`. Pass `extraRows` for model name/version; see [adoption](docs/integration.md#about--version-in-settings). |
 | What's new | Add the `scripts/whats-new.sh` build phase, load `WhatsNewSeen.bundledFeed()`, then display `WhatsNewRow` / `WhatsNewView`; see the [complete setup](docs/integration.md). |
 | Log retention | Call `BugStore().pruneLogs(logger: log.logger)` at launch. Add `keepNewest: 20` for a count cap; logs named by reports remain protected. |
 

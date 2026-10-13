@@ -528,3 +528,46 @@ waiting for its paired iPhone. Give that watch target its own authorized App ID/
 container, and call `start()` when the watch app launches or becomes active. This does not add a watch report
 dialog, shake handling, dictation UI, screenshots, or a WatchConnectivity relay, so #25 remains open for those
 integration choices and real watch/cellular validation.
+
+
+## About / version in Settings
+
+Place `BugKitAboutLink()` in a Settings `List` or `Form` inside the app's `NavigationStack`. It opens the
+shared `BugKitAboutView`: app name, version (build), short commit linked to GitHub, and repository link.
+The same view supports iOS, macOS and watchOS. For a custom navigation label or a sheet, present
+`BugKitAboutView()` directly; give a Mac sheet/window its usual size.
+
+The metadata comes from the **built app's Info.plist**, not the BugKit package or runtime git. Reuse
+`BugKitCommit` from report setup above, and add `BugKitRepositoryURL` containing the app's HTTPS GitHub
+repository URL. The name uses `CFBundleDisplayName`, falling back to `CFBundleName`; version and build
+use `CFBundleShortVersionString` and `CFBundleVersion`. Missing values display “Unknown”; missing or
+invalid links stay unavailable. A short existing commit is supported; a full SHA makes the commit link
+unambiguous. Dirty builds show `-dirty` and explicitly link only the base commit.
+
+For a generated Info.plist, add these settings to the app target's xcconfig (the empty `$()` keeps the
+URL's double slash from starting an xcconfig comment):
+
+```xcconfig
+INFOPLIST_KEY_BugKitCommit = $(BUGKIT_COMMIT)
+INFOPLIST_KEY_BugKitRepositoryURL = https:/$()/github.com/OWNER/REPO
+```
+
+If the app maintains an explicit Info.plist instead, add `BugKitCommit = $(BUGKIT_COMMIT)` and
+`BugKitRepositoryURL = https://github.com/OWNER/REPO` there. Substitute the **app's** repository, and pass
+`BUGKIT_COMMIT="$(git rev-parse HEAD)"` on its existing build command, evaluated in the app checkout.
+Keep this on every build path (local and CI); a hardcoded SHA or a stale generated xcconfig is not build
+provenance. Apps using the existing `git describe --always --dirty --exclude='*'` value may retain it.
+
+After that metadata setup, each app's Settings adoption is one line:
+
+| App | Settings row | `BugKitRepositoryURL` |
+| --- | --- | --- |
+| Context Grabber (#303) | `BugKitAboutLink()` | `https://github.com/idvorkin/context-grabber` |
+| Voice Keyboard (#64) | `BugKitAboutLink(extraRows: [.init(title: "Model", value: modelName), .init(title: "Model version", value: modelVersion)])` | `https://github.com/idvorkin/voice-keyboard` |
+| Any other app | `BugKitAboutLink()` | `https://github.com/OWNER/REPO` |
+
+`modelName` and `modelVersion` are the app's own strings; BugKit does not infer or load a model. Extra rows
+remain in the supplied order, and duplicate titles are allowed. `BugKitAboutInfo(bundle:)` defaults to the
+main bundle; pass a different bundle explicitly when the Settings screen represents a different app target.
+Host tests cover metadata fallback, short/dirty commits and repository/commit URL construction. Once the
+build turn is granted, verify the actual built Info.plist and open both links in each adopting app's Settings.
