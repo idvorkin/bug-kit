@@ -16,11 +16,13 @@
 #   - one signing build at a time on this Mac: the whole run holds `lockf -k -t 900 ~/tmp/agent/locks/xcode-signing.lock`
 #     (MM mmn-af8), and inside it waits for any unlocked `xcodebuild … -allowProvisioningUpdates` (anchored pgrep);
 #   - a failed build never installs the previous bundle: success is "BUILD SUCCEEDED" in the output (EA #43);
-#   - "No Accounts" in the output means the Xcode account is gone: sign in at Xcode › Settings › Accounts, rerun alone;
+#   - inside the lock, signing-guard.sh waits for Mac unlock and prevents display sleep during the build;
+#   - "No Accounts" or "Failed to load credentials" stops the run: tell the person and never retry automatically;
 #   - a launch refused because the device is locked (CoreDeviceError 10002) is a soft success: installed, opens when
 #     unlocked; a watch that refuses (1011/4000, usage assertion, timeout) is asleep, not broken.
 set -uo pipefail
 CONFIG=${BUG_KIT_CONFIG:-$HOME/.config/bug-kit/apps.json}
+SIGNING_GUARD=$(cd "$(dirname "$0")" && pwd)/signing-guard.sh
 LOCK=${BUG_KIT_SIGNING_LOCK:-$HOME/tmp/agent/locks/xcode-signing.lock}
 app=${1:?usage: deploy-all.sh <app> [--only devs] [--register dev] [--watch] [--dry-run]}
 shift
@@ -115,13 +117,16 @@ if [ "$dry" = 1 ]; then
   run xcodebuild "${container[@]}" -scheme "$scheme" -derivedDataPath "$derived" -destination "platform=iOS,id=$dest_udid" \
     -allowProvisioningUpdates -allowProvisioningDeviceRegistration ${settings[@]+"${settings[@]}"} build
 else
-  out=$(xcodebuild "${container[@]}" -scheme "$scheme" -derivedDataPath "$derived" \
+  out=$("$SIGNING_GUARD" xcodebuild "${container[@]}" -scheme "$scheme" -derivedDataPath "$derived" \
     -destination "platform=iOS,id=$dest_udid" -allowProvisioningUpdates -allowProvisioningDeviceRegistration \
     ${settings[@]+"${settings[@]}"} build 2>&1)
+  build_status=$?
   echo "$out" | grep -E "error:|BUILD (SUCCEEDED|FAILED)" | sort -u | head -40
-  if grep -q "No Accounts" <<<"$out"; then
-    echo "Xcode has no account: sign in at Xcode › Settings › Accounts, then rerun this alone (docs/ops/signing.md)" >&2
+  if grep -qiE 'No Accounts|Failed to load credentials' <<<"$out"; then
+    echo "Xcode account access failed: stop, do not retry; ask the person to unlock and check Xcode Settings > Accounts (docs/ops/signing.md)" >&2
+    exit 78
   fi
+  [ "$build_status" -eq 0 ] || { echo "build failed: nothing installed" >&2; exit "$build_status"; }
   grep -q "BUILD SUCCEEDED" <<<"$out" || { echo "build failed: nothing installed" >&2; exit 1; }
 fi
 

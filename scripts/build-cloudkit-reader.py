@@ -41,7 +41,7 @@ def main():
         command += ['-xcconfig', str(local), '-allowProvisioningUpdates', '-allowProvisioningDeviceRegistration']
         lock = Path.home() / 'tmp/agent/locks/xcode-signing.lock'
         lock.parent.mkdir(parents=True, exist_ok=True)
-        command = ['lockf', '-k', '-t', '900', str(lock)] + command
+        command = ['lockf', '-k', '-t', '900', str(lock), str(root / 'scripts/signing-guard.sh')] + command
     subprocess.run(['xcodegen', 'generate', '--spec', str(root / 'Tools/CloudKitReader/project.yml')], check=True)
     # Logs can contain local identifiers. Keep them outside version control, and show a sanitized result.
     derived.mkdir(parents=True, exist_ok=True)

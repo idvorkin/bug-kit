@@ -34,16 +34,53 @@ The apps hit each of these:
 
 - **The only reliable check is one device build that needs the portal.** Grep its output for `No Accounts`.
 - **Don't trust `defaults read com.apple.dt.Xcode DVTDeveloperAccountManagerAppleIDLists`.** In Xcode 27 it listed the account while builds failed with No Accounts, and it was empty while a build signed and registered a new device.
-- **Don't search the keychain.** There is no item to find either way.
+- **Do not dump keychain credentials.** Xcode 27 uses the data-protection keychain service
+  `com.apple.dt.Xcode.KeychainService`; locked-screen reads can be denied with `-25308`.
 - **When reading Xcode's unified log,** use `/usr/bin/log`, because in zsh `log` is a builtin. Read it within the hour. Filter out token, session, password and authorization lines before writing anything down: one search once captured a live session token. The header names to drop are `X-Apple-GS-Token` and `DSESSIONID` (CG), as in `/usr/bin/log show … | grep -v -i -E 'X-Apple-GS-Token|DSESSIONID|token|password|authorization'`.
 
 ## Fixing it
 
 1. Have the person sign in at **Xcode › Settings › Accounts**. There is no command-line sign-in.
-2. Straight away, run the build that needs the portal, **first and alone**, under the lock. It registers the device or adds the capability, and Xcode caches the new profile.
+2. Unlock the Mac, then run the build that needs the portal, **first and alone**, under the lock and
+   `scripts/signing-guard.sh`. It registers the device or adds the capability, and Xcode caches the new profile.
 3. From then on, builds that need no new portal change keep working even if the account drops again. The iCloud capability is the usual case: one signing build after sign-in, then cached-profile builds work.
 
-The account dropped about 30 minutes after each sign-in on 2026-10-07. The cause is unproven. One suspect is that a background launchd session (an agent's shell) cannot refresh the token.
+The driver analysis in [BugKit #53](https://github.com/idvorkin/bug-kit/issues/53) attributes the repeated
+2026-10-11/12 account losses to provisioning builds while the Mac was locked. On 10-12 the screen locked
+at 18:28:16; a lone unsandboxed signing build at 18:36:40 encountered a denied data-protection keychain
+read (`-25308`) and Xcode discarded the account. Unlocking afterward did not restore it. Concurrency,
+sandboxing, defaults writes and token expiry were ruled out for that incident. Keep the signing lock for
+serialization; it does not make a locked-screen build safe.
+
+## No provisioning builds while the Mac is locked
+
+Every app's signing recipe must run the shared guard **inside** `xcode-signing.lock`. Cached profiles do
+not exempt a command that passes `-allowProvisioningUpdates`: it can still read the account keychain. The guard checks
+`ioreg -n Root -d1` for `"CGSSessionScreenIsLocked" = Yes` and waits for the person to unlock the Mac before
+starting the build. It runs `caffeinate -d -w $$` for its lifetime, including the build, then cleans up the
+assertion. `caffeinate -i` alone does not prevent display sleep and the immediate screen lock. The guard
+refuses to start if the lock-state query fails or the display assertion process exits.
+
+One-line adoption in each app's existing device recipe (substitute its BugKit checkout and build args):
+
+```sh
+lockf -k -t 900 ~/tmp/agent/locks/xcode-signing.lock "$BUG_KIT/scripts/signing-guard.sh" xcodebuild <existing-build-args>
+```
+
+Create the lock directory first. Keep the outer build turn and `build.lock` rules; do not reacquire either
+lock if the caller already holds it. `scripts/deploy-all.sh` and the signed
+`python3 scripts/build-cloudkit-reader.py` path already invoke the guard inside their signing lock;
+calling recipes must not add a second signing lock around them. The unsigned reader path needs no guard.
+
+If build output contains **No Accounts** or **Failed to load credentials**, the guard returns 78 even if
+the command reports success. Stop, tell the person, and never retry or install automatically. The person
+must unlock and check **Xcode › Settings › Accounts**; sign in again only if needed, then explicitly
+request a new guarded attempt. Other build failures keep their original nonzero exit status.
+
+The display assertion prevents automatic display sleep; it cannot override a person manually locking
+the screen during a build. Leave the Mac unlocked until signing finishes. Host checks use fake ioreg,
+caffeinate and build tools. The real `=Yes` wait/unlock behavior and display assertion remain to verify
+in the next granted build turn, without starting a provisioning build while locked.
 
 ## Don'ts
 

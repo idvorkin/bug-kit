@@ -390,6 +390,8 @@ Production configuration instead of installing a reader that cannot pass this ch
 Apple documents this
 [app wrapper requirement](https://developer.apple.com/documentation/technotes/tn3125-inside-code-signing-provisioning-profiles).
 
+The signed reader builder takes the signing lock and runs the [screen-lock guard](ops/signing.md#no-provisioning-builds-while-the-mac-is-locked). It waits for Mac unlock before provisioning, prevents display sleep during the build, and stops on account-loss messages without installing or retrying.
+
 Keep signing/runtime values in **`~/.config/bug-kit/cloudkit.json`** (mode 600), never in this repo:
 
 ```json

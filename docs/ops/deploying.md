@@ -5,8 +5,11 @@
 Every app's device recipe has this shape: EA `build-device` and `run-device`, CG `native-build-device`, MM `just ipad`.
 
 ```sh
+set -e
+mkdir -p ~/tmp/agent/locks
 xcodegen generate                      # if the project is generated: after any project.yml change, or the build uses the old one
-xcodebuild -project App.xcodeproj -scheme App -derivedDataPath Build \
+lockf -k -t 900 ~/tmp/agent/locks/xcode-signing.lock "$BUG_KIT/scripts/signing-guard.sh" \
+  xcodebuild -project App.xcodeproj -scheme App -derivedDataPath Build \
   -destination "platform=iOS,id=<udid>" \
   -allowProvisioningUpdates -allowProvisioningDeviceRegistration build
 xcrun devicectl device install app --device <id> Build/Build/Products/Debug-iphoneos/App.app
@@ -23,7 +26,9 @@ xcrun devicectl device process launch --device <id> <bundle-id>
 
 ```bash
 set -uo pipefail
-out=$(xcodebuild … build 2>&1)
+out=$("$BUG_KIT/scripts/signing-guard.sh" xcodebuild … build 2>&1)
+build_status=$?
+[ "$build_status" -eq 0 ] || exit "$build_status"  # including account-loss guard failures
 echo "$out" | grep -E "error:|BUILD (SUCCEEDED|FAILED)"
 echo "$out" | grep -q "BUILD SUCCEEDED"     # this line's status is the recipe's
 ```
@@ -59,12 +64,14 @@ echo "$out" | grep -q "BUILD SUCCEEDED"     # this line's status is the recipe's
 
 Never run two `-allowProvisioningUpdates` builds at the same time on one Mac, across all agents.
 
-- **The incident:** on 2026-10-07 one agent's signing build ran while another started. The second build failed with `No Accounts`, and a minute later Xcode's account list in its preferences was found empty. That is unproven as the cause, but it is the one correlation in the evidence.
+- **The cause of the repeated account losses:** [BugKit #53](https://github.com/idvorkin/bug-kit/issues/53)
+  traced them to provisioning builds while the Mac was locked: keychain reads fail and Xcode discards the
+  account. Keep serialization, and also use the [screen-lock guard](signing.md#no-provisioning-builds-while-the-mac-is-locked).
 - **The lock:** wrap the whole run, from project generation to launch, in a kernel lock:
 
   ```sh
   mkdir -p ~/tmp/agent/locks
-  lockf -k -t 900 ~/tmp/agent/locks/xcode-signing.lock <the build and install>
+  lockf -k -t 900 ~/tmp/agent/locks/xcode-signing.lock "$BUG_KIT/scripts/signing-guard.sh" <the build and install>
   ```
 
   - `lockf(1)` holds the lock for the life of the command, so no lock goes stale.
@@ -86,7 +93,8 @@ Never run two `-allowProvisioningUpdates` builds at the same time on one Mac, ac
 
 1. It takes the lock.
 2. It waits for any unlocked signing build.
-3. It builds once, for the first device.
+3. Inside the signing lock, it waits for Mac unlock and prevents display sleep while building once, for the
+   first device. Account-access errors stop the run without retrying or installing.
 4. It installs and launches on each paired iPhone and iPad.
 
 It needs a `build` object in the app's entry in `~/.config/bug-kit/apps.json` (see `listener/apps.example.json`).
