@@ -114,6 +114,7 @@ Part of the [BugKit stories](README.md).
 - **Scenario:** First contact
 - **Given:** the listener has never seen this app on this device
 - **Then:** every report already there is marked seen without filing, unless `--backfill` was passed
+- **And:** for a GitHub-tracked app, a report with no issue yet is filed rather than marked seen
 
 - **Scenario:** An agent is testing with the person
 - **Given:** the agent armed `scripts/bugs-monitor.sh <app>` as a persistent Monitor
