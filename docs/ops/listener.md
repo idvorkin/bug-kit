@@ -113,7 +113,7 @@ Every step is a JSON line in `~/tmp/agent/bugs/listener.log`:
 - `device` (reachable, locked, ms)
 - `copy` (source, ok, ms, locked, stderr on failure)
 - `index`
-- `baseline`
+- `baseline` (marked_seen, unfiled), `baseline_deferred` (the GitHub issue list could not be read; no baseline yet)
 - `report`
 - `crash`, `crash_baseline`, `crash_unreadable`
 - `evidence_pending` (named evidence failed to copy; retries next poll)
@@ -173,7 +173,7 @@ Crash polling runs independently for every reachable app/device pair, even if `b
 
 Each diagnostic file gets a stable `crash:<sha256>` identity from its app bundle, device ID and canonical filename. The on-device `.reported.txt` rename does not create a second issue. A MetricKit payload containing several diagnostics becomes one issue; it is not automatically merged with an earlier signal report. Crash deduplication uses its ID, never a manual report's timestamp or note.
 
-Manual reports use `keys` in `seen.json`; crashes use `crash_keys`. Each stream establishes its own baseline on its first successful snapshot. Pass `--backfill` to file that initial snapshot. A confirmed missing crash directory counts as an empty baseline, so the first crash appearing later is filed. An unreachable device or failed copy does not establish a baseline. On upgrade, pass `--backfill` before the first crash snapshot if historical crash files should be filed.
+Manual reports use `keys` in `seen.json`; crashes use `crash_keys`. Each stream establishes its own baseline on its first successful snapshot. For an app with a GitHub tracker, the manual-report baseline holds only reports that already have an issue (the `<!-- bug-id: -->` / `<!-- bug: -->` marker lookup `pull-reports.sh --check` uses); reports with no issue are filed on that first poll, so the listener and `--check` agree (#65). If the issue list cannot be read, no baseline is set (`baseline_deferred`, counted as an error) and the next poll tries again. Other trackers baseline the whole snapshot. Pass `--backfill` to file that initial snapshot. A confirmed missing crash directory counts as an empty baseline, so the first crash appearing later is filed. An unreachable device or failed copy does not establish a baseline. On upgrade, pass `--backfill` before the first crash snapshot if historical crash files should be filed.
 
 For a new crash, the listener also pulls the configured log directory. Signal and exception timestamps select the latest `session_start.started` at or before the crash and include `session_t_ms`, with `session_match` explicitly marked as inferred. Logs without that metadata and MetricKit payloads have `session_match: unknown`; their available logs remain on the Mac. A failed log copy leaves the crash pending; a confirmed absent log directory allows filing with evidence marked unavailable.
 

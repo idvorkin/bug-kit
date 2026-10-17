@@ -1098,3 +1098,43 @@ def test_cloud_sync_rejects_invalid_download_count(listener_state, monkeypatch, 
     assert summary["errors"] == 1 and summary["reachable"] == 0
     event = json.loads(bl.LOG.read_text().splitlines()[-1])
     assert event["ok"] is False and "downloaded" not in event
+
+
+class MarkerFiler(CloudFakeFiler):
+    """GitHub issue markers: ids in `filed` already have an issue; `lookup_ok` False is a failed issue read."""
+
+    def __init__(self, filed=()):
+        super().__init__()
+        self.filed, self.lookup_ok = set(filed), True
+
+    def check(self, a, rec):
+        if not self.lookup_ok:
+            return "error", None
+        return ("already_filed", a["tracker"]["repo"]) if rec["id"] in self.filed else None
+
+
+def test_first_contact_files_reports_that_have_no_issue(mac_fixture, monkeypatch):
+    cfg, root, _ = mac_fixture
+    cfg["apps"][0]["tracker"] = {"kind": "github", "repo": "example/app"}
+    filed, unfiled = write_mac_report(root), write_mac_report(root, note="never filed")
+    filer = MarkerFiler(filed=[filed["id"]])
+    monkeypatch.setattr(bl, "Filer", lambda: filer)
+    result = bl.poll(cfg, False)  # first contact, no backfill (#65)
+    assert result["baselined"] == 1 and result["filed"] == 1
+    assert [key for key, _ in filer.calls] == [unfiled["id"]]
+    assert bl.poll(cfg, False)["filed"] == 0 and len(filer.calls) == 1
+
+
+def test_first_contact_waits_for_a_readable_tracker_before_baselining(mac_fixture, monkeypatch):
+    cfg, root, _ = mac_fixture
+    cfg["apps"][0]["tracker"] = {"kind": "github", "repo": "example/app"}
+    unfiled = write_mac_report(root)
+    filer = MarkerFiler()
+    filer.lookup_ok = False
+    monkeypatch.setattr(bl, "Filer", lambda: filer)
+    result = bl.poll(cfg, False)
+    assert result["errors"] == 1 and result["baselined"] == 0 and not filer.calls
+    assert "keys" not in bl.load_seen()["local.fixture|local-mac"]
+    filer.lookup_ok = True
+    assert bl.poll(cfg, False)["filed"] == 1
+    assert [key for key, _ in filer.calls] == [unfiled["id"]]
