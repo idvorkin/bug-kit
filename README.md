@@ -200,7 +200,7 @@ listener/bug-listener
 listener/bug-listener status --json
 ```
 
-**First contact matters:** without `--backfill`, the listener marks existing reports and crash files seen without filing them. The two streams have separate baselines, including when upgrading from a listener that did not discover crashes. Use `--backfill` on the first real poll to file existing evidence. A dry run copies files and writes logs, but leaves issues, seen-store, inbox and notifications unchanged.
+**First contact matters:** without `--backfill`, the listener marks existing reports and crash files seen without filing them; for a GitHub-tracked app, reports that have no issue yet are filed instead (see [listener operations](docs/ops/listener.md)). The two streams have separate baselines, including when upgrading from a listener that did not discover crashes. Use `--backfill` on the first real poll to file existing evidence. A dry run copies files and writes logs, but leaves issues, seen-store, inbox and notifications unchanged.
 
 Crash files are discovered on every poll, even without a manual report. Signal/exception crashes include the latest preceding session log when its start time is available; that association is explicitly marked as inferred. MetricKit payloads keep their crash/hang evidence without claiming an exact session.
 

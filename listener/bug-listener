@@ -714,20 +714,36 @@ def poll_reports(a: dict, dev: dict, local: Path, locked: Any, seen: dict, filer
     pair = f"{a['bundle']}|{dev['id']}"
     entry = seen.setdefault(pair, {"since": now()})
     first = "keys" not in entry
-    known = set(entry.setdefault("keys", []))
+    known = set(entry.get("keys", []))
     fresh = dict((k, r) for k, r in reports if k not in known)
     log("index", reports=len(reports), new=len(fresh), first_contact=first, **ctx)
     if first and not backfill:
-        entry["keys"] = sorted(set(k for k, _ in reports))
-        if dev.get("type") == "Mac":
-            for key, rec in reports:
-                ref = app_filed_ref(a, rec)
-                if ref:
-                    record_app_receipt(a, rec, key, ref, seen)
+        # Baseline only what is already filed (#65): a report the app's own filer never filed is filed now, the
+        # same marker lookup `pull-reports.sh --check` does. Without a readable tracker, set no baseline yet.
+        unfiled = set()
+        app_refs = {}
+        for key, rec in reports:
+            ref = app_filed_ref(a, rec) if dev.get("type") == "Mac" else None
+            if ref:
+                app_refs[key] = (rec, ref)
+                continue
+            stop = filer.check(a, rec)
+            if stop is not None and stop[0] == "error":
+                summary["errors"] += 1
+                log("baseline_deferred", reason="tracker_lookup", **ctx)
+                return
+            if stop is None and a["tracker"].get("kind") == "github":
+                unfiled.add(key)
+        for key, (rec, ref) in app_refs.items():
+            record_app_receipt(a, rec, key, ref, seen)
+        entry["keys"] = sorted(set(k for k, _ in reports) - unfiled)
         summary["baselined"] += len(entry["keys"])
-        log("baseline", marked_seen=len(entry["keys"]), **ctx)
+        log("baseline", marked_seen=len(entry["keys"]), unfiled=len(unfiled), **ctx)
         save_seen(seen)
-        return
+        fresh = {k: r for k, r in fresh.items() if k in unfiled}
+        if not fresh:
+            return
+    entry.setdefault("keys", [])
     save_seen(seen)
     for key, rec in fresh.items():
         summary["new"] += 1
