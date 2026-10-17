@@ -96,6 +96,7 @@ Never run two `-allowProvisioningUpdates` builds at the same time on one Mac, ac
 
   A bare `pgrep -f xcodebuild` also matches other agents' shells that merely mention the word. It once counted 30 "builds" and held a build for 20 minutes. To ask whether any xcodebuild is running at all, use `pgrep -x xcodebuild`.
 - **Don't run a simulator test while a signing build runs** (EA). Its waits fail under contention, and a check can read the previous result.
+- **Create build logs inside the lock.** A log file made before `lockf` is shared by every waiting run, so a failing build can read another run's `BUILD SUCCEEDED` (CG #298). Create it in the locked command, with a per-run name (`mktemp`). For a simulator, run the command through `scripts/with-simulator.sh` ([simulators.md](simulators.md)).
 
 ## Build once, install everywhere
 

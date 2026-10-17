@@ -180,7 +180,7 @@ For package updates, workarounds to remove, per-app options and downstream verif
 
 For Debug symbolication, set Xcode’s `DEBUG_INFORMATION_FORMAT = dwarf-with-dsym` and keep the dSYM from the exact build that crashed. Xcode can place both the app stub and `<App>.debug.dylib` DWARF files in one `<App>.app.dSYM`; the script scans both. A Debug build without this setting may have no dSYM, in which case the script exits 2. Multiline watchdog reasons are printed as a single cause line.
 
-For agent tools, use `scripts/log-tool.sh` to slice logs, `scripts/symbolicate.sh` with a matching dSYM, and `scripts/bugs-monitor.sh [app]` to watch report checks. Configure `pull_extra` in an app's config entry for extra paths copied by `pull-reports.sh`. Source `scripts/smoke-lib.sh` from app-specific simulator checks; see [simulator setup](docs/ops/simulators.md).
+For agent tools, use `scripts/log-tool.sh` to slice logs, `scripts/symbolicate.sh` with a matching dSYM, and `scripts/bugs-monitor.sh [app]` to watch report checks. Configure `pull_extra` in an app's config entry for extra paths copied by `pull-reports.sh`. Source `scripts/smoke-lib.sh` from app-specific simulator checks, and claim the simulator with `mkdir -p ~/tmp/agent/locks && lockf -k -t 3600 ~/tmp/agent/locks/build.lock scripts/with-simulator.sh <name> -- <command>` (drop the `lockf` when an outer driver already holds `build.lock`); see [simulator setup](docs/ops/simulators.md).
 
 ## Pull and file reports
 
