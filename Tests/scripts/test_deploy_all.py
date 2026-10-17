@@ -14,7 +14,8 @@ SCRIPT = Path(__file__).resolve().parents[2] / "scripts" / "deploy-all.sh"
 UNLOCKED = '#!/bin/bash\necho \'"CGSSessionScreenIsLocked" = No\'\n'
 
 
-def deploy(tmp_path, dry_run=False, account_error=None, ioreg_script=UNLOCKED):
+def deploy(tmp_path, dry_run=False, account_error=None, ioreg_script=UNLOCKED, xcodebuild_fail=None,
+           xcodebuild_note=None):
     tools = tmp_path / "bin"
     tools.mkdir(exist_ok=True)
     calls = tmp_path / "calls.jsonl"
@@ -32,7 +33,10 @@ else:
 """)
     xcrun.chmod(0o755)
     xcodebuild = tools / "xcodebuild"
-    xcodebuild.write_text("#!/bin/bash\nprintf '%s\\n' \"${TEST_ACCOUNT_ERROR:-}\"\necho '** BUILD SUCCEEDED **'\n")
+    xcodebuild.write_text("#!/bin/bash\nprintf '%s\\n' \"${TEST_ACCOUNT_ERROR:-}\"\n"
+                          "[ -n \"${TEST_XCODEBUILD_FAIL:-}\" ] && { printf '%s\\n' \"$TEST_XCODEBUILD_FAIL\"; exit 70; }\n"
+                          "printf '%s\\n' \"${TEST_XCODEBUILD_NOTE:-}\"\n"
+                          "echo '** BUILD SUCCEEDED **'\n")
     xcodebuild.chmod(0o755)
     pgrep = tools / "pgrep"
     pgrep.write_text("#!/bin/bash\nexit 1\n")
@@ -50,7 +54,9 @@ else:
     config.write_text(json.dumps({"apps": [{"name": "app", "bundle": "app.bundle", "repo": str(tmp_path),
         "build": {"scheme": "App", "project": "App.xcodeproj", "app": "Build/My App.app"}}]}))
     env = {**os.environ, "PATH": f"{tools}:{os.environ['PATH']}", "BUG_KIT_CONFIG": str(config),
-           "BUG_KIT_LOCKED": "1", "TEST_DEPLOY_CALLS": str(calls), "TEST_ACCOUNT_ERROR": account_error or ""}
+           "BUG_KIT_LOCKED": "1", "TEST_DEPLOY_CALLS": str(calls), "TEST_ACCOUNT_ERROR": account_error or "",
+           "TEST_XCODEBUILD_FAIL": xcodebuild_fail or "",
+           "TEST_XCODEBUILD_NOTE": xcodebuild_note or ""}
     args = ["/bin/bash", str(SCRIPT), "app"] + (["--dry-run"] if dry_run else [])
     return subprocess.run(args, env=env, capture_output=True, text=True, timeout=10), calls
 
@@ -96,3 +102,32 @@ def test_unreadable_lock_state_is_shown_and_nothing_installs(tmp_path):
     assert result.returncode == 69, result.stdout + result.stderr
     assert "cannot read screen-lock state; build not started" in result.stderr
     assert not calls.exists()
+
+
+LOCKED_DESTINATION = (
+    "xcodebuild: error: Timed out waiting for all destinations matching the provided destination specifier to "
+    "become available\n\t{ platform:iOS, arch:arm64, id:hardware-id, name:Test Phone, error:The device needs to be "
+    "unlocked to continue Unlock the device, then ensure it is discoverable via Bluetooth/WiFi or attached with a "
+    "cable. }")
+
+
+def test_a_destination_locked_at_build_time_names_the_device_not_a_build_failure(tmp_path):
+    result, calls = deploy(tmp_path, xcodebuild_fail=LOCKED_DESTINATION)
+    assert result.returncode == 79, result.stdout + result.stderr
+    assert "test-phone is locked: unlock it and deploy again" in result.stderr
+    assert "build failed" not in result.stderr
+    assert not calls.exists()
+
+
+def test_other_build_errors_still_read_as_build_failures(tmp_path):
+    result, calls = deploy(tmp_path, xcodebuild_fail="error: compile failed")
+    assert result.returncode == 70, result.stdout + result.stderr
+    assert "build failed: nothing installed" in result.stderr
+    assert not calls.exists()
+
+
+def test_a_successful_build_that_mentions_a_locked_device_still_installs(tmp_path):
+    result, calls = deploy(tmp_path, xcodebuild_note="warning: another device needs to be unlocked to continue")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "is locked" not in result.stderr
+    assert len(calls.read_text().splitlines()) == 2
