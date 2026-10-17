@@ -106,6 +106,13 @@ For Apple dictation, add `NSSpeechRecognitionUsageDescription` and `NSMicrophone
      "- **Summary:**" form.
    - A commit counts when its subject starts with "Story NNN:", ends with "(story NNN)", names the story in its
      message, or names an issue that a story's Issues line lists.
+     Issue-first brackets also work: `Add the panel (#12; story 007)` and
+     `Fix two things (#12, #13; stories 007, 004)`. The first named story and first issue are used;
+     each story still appears at most once per day.
+   - If all stories live in `docs/stories.md`, pass `--stories "$SRCROOT/docs" --base-url
+     "https://github.com/<owner>/<repo>/blob/main/docs/"`. The folder reader finds every
+     `### User Story NNN:` heading in that file and links to `stories.md#user-story-NNN`.
+     Other Markdown files with no story headings are ignored. `--stories` takes a directory.
    - Without git history it writes an empty feed and never fails the build.
    - The phase reads `.git` and writes into the bundle; the existing recipe sets
      `ENABLE_USER_SCRIPT_SANDBOXING: NO` on the app target.
