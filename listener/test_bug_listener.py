@@ -763,8 +763,19 @@ def test_crash_does_not_match_manual_report_at_same_second(listener_state, monke
     assert "<!-- bug-id:crash:new -->" in body
 
 
+NO_FILE_NODE = ("ERROR: Failed to retrieve the file node for Documents/crashes "
+                "(com.apple.dt.CoreDeviceError error 7000 (0x1B58))")
+NOT_INSTALLED = ("ERROR: An unknown error occurred. (com.apple.dt.CoreDeviceError error -1 (0xFFFFFFFF)) | "
+                 "---------------------------------------- | "
+                 "The operation couldn’t be completed. (ContainerLookupErrorDomain error -1.)")
+DISCONNECTED = ("ERROR: The device disconnected immediately after connecting. "
+                "(com.apple.dt.CoreDeviceError error 4000 (0xFA0))")
+
+
 @pytest.mark.parametrize("rc,err,expected", [(1, "No such file or directory", True),
-    (127, "No such file or directory: xcrun", False), (124, "timed out", False), (1, "device unreachable", False)])
+    (127, "No such file or directory: xcrun", False), (124, "timed out", False), (1, "device unreachable", False),
+    # devicectl's own wording (#39): a folder the app never made, an app not installed on this device, a real drop
+    (1, NO_FILE_NODE, True), (1, NOT_INSTALLED, True), (1, DISCONNECTED, False)])
 def test_optional_copy_distinguishes_missing_evidence_from_tool_failures(listener_state, monkeypatch, rc, err, expected):
     monkeypatch.setattr(bl, "run", lambda *args, **kwargs: (rc, "", err))
     assert bl.copy({"id": "d", "dir": "phone"}, {"bundle": "b", "name": "app"}, "Documents/crashes",

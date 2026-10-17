@@ -98,6 +98,7 @@ Keep the `Documents/bugs.jsonl`, `Documents/bugs/`, `Documents/logs/` and `Docum
       `herdr notification show`.
 5. Independently of the manual index, it copies the crash folder and files newly discovered diagnostic files with their session evidence.
 6. If the named report folder or session log fails to copy, or filing fails, the report stays unseen and the next poll tries again. A missing crash directory is optional: an app may never have crashed. Repeated index lines are handled once per poll.
+   Expected misses on the index and crash folder are not errors: a file the app never made (devicectl's "Failed to retrieve the file node", CoreDeviceError 7000) logs `copy` with `absent: path`, and an app not installed on that device (`ContainerLookupErrorDomain`) logs `absent: app_not_installed`. Real failures, such as a device that drops the connection (CoreDeviceError 4000), still count.
 
 GitHub deduplication prefers UUID markers. Timestamp markers match legacy reports or issues that have no UUID; two UUID reports at the same timestamp remain distinct. The note-prefix fallback applies only to marker-free issues. The lookup currently reads at most 1,000 issues per repository.
 
@@ -111,7 +112,7 @@ Every step is a JSON line in `~/tmp/agent/bugs/listener.log`:
 - `mac_store` (app, reachable; [local Mac apps](#local-mac-apps))
 - `devices`
 - `device` (reachable, locked, ms)
-- `copy` (source, ok, ms, locked, stderr on failure)
+- `copy` (source, ok, ms, locked, stderr on failure; `missing` and `absent: path|app_not_installed` for expected misses)
 - `index`
 - `baseline`
 - `report`

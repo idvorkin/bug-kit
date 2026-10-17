@@ -249,13 +249,21 @@ def copy(dev: dict, a: dict, source: str, dest: Path, locked: Any, *, allow_miss
                       "--domain-identifier", a.get("app_group") or a["bundle"],
                       "--source", source, "--destination", str(dest), "--timeout", "90"], timeout=120)
     ms = int((time.monotonic() - t0) * 1000)
-    missing = allow_missing and rc not in (0, 124, 127) and bool(re.search(
-        r"no such file|file[^\n]*(?:does not exist|not found)|directory[^\n]*(?:does not exist|not found)", err, re.I))
+    # Expected misses, not failures (#39): a file or folder the app never made (devicectl: "Failed to retrieve the
+    # file node", CoreDeviceError 7000), or an app not installed on this device (ContainerLookupErrorDomain).
+    absent = None
+    if allow_missing and rc not in (0, 124, 127):
+        if re.search(r"ContainerLookupErrorDomain", err):
+            absent = "app_not_installed"
+        elif re.search(r"no such file|failed to retrieve the file node|file[^\n]*(?:does not exist|not found)"
+                       r"|directory[^\n]*(?:does not exist|not found)", err, re.I):
+            absent = "path"
+    missing = absent is not None
     ok = (rc == 0 and dest.exists()) or missing
     fields = dict(device=dev["dir"], app=a["name"], source=source, ok=ok, ms=ms, locked=locked,
                   domain="appGroupDataContainer" if a.get("app_group") else "appDataContainer")
     if missing:
-        fields["missing"] = True
+        fields.update(missing=True, absent=absent)
     if not ok:
         fields.update(rc=rc, stderr=tail(err))
     log("copy", **fields)
