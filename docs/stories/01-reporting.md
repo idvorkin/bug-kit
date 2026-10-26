@@ -297,10 +297,11 @@ Host coverage (Foundation, `swift test`): `DictationProviderTests.swift` verifie
 **From:** Igor, 2026-10-26: "When we're doing voice input can we make sure to be able to have a mic selector and
 then see the audio input levels? This should probably be on every voice input."
 **Issues:** beads bug-0b9
-**Status:** in progress on branch `mic-level-meter`. The level arithmetic (silence, full scale, smoothing, the
-update rate) is verified on the host by `DictationLevelTests`; the published level rising and returning to empty by
-the iOS simulator bundle (`NoteDictationTests`); the controls by typecheck. A real voice moving the meter is a
-device check, still to do.
+**Status:** PR #99 (1d88f6b, 7e737a6, fb02ef1). The level arithmetic (silence, full scale, the dB mapping,
+smoothing, about 20 updates a second, a peak between updates) is verified on the host by `DictationLevelTests`. The
+level rising with sound and returning to empty on finish, on cancel, and for audio drained after finish begins is
+verified in the iOS simulator by `NoteDictationTests`. The controls and the integration example are verified by
+typecheck. A real voice moving the meter, and the controls on screen, are device checks still to do.
 
 - **As someone** speaking a note or a message into any of the apps
 - **I want to** see a level that moves with my voice, and choose the microphone right beside the mic button
