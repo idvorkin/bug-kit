@@ -214,20 +214,33 @@ The input is a preference: iOS decides the actual route, and headset selection m
 
 ### The microphone picker and input level on every voice input
 
-The report dialog shows the microphone menu and a live input level meter under the note. An app with its own voice input built on `NoteDictation` gets the same controls by placing `BugVoiceInputControls(dictation:)` beside its mic button:
+The report dialog shows the microphone menu and a live input level meter under the note. An app with its own voice input built on `NoteDictation` gets the same controls by placing `BugVoiceInputControls(dictation:)` beside its mic button. Create the `NoteDictation` in an initializer, as the reporter is created above, because a property initializer cannot use the app's log or model:
 
 ```swift
-@StateObject private var dictation = NoteDictation(logger: log.logger, hostMicrophoneBusy: { model.inCall })
+struct MessageField: View {
+  @StateObject private var dictation: NoteDictation
+  @State private var text = ""
 
-HStack {
-  Button { dictation.toggle(note: text) { text = $0 } } label: {
-    Image(systemName: dictation.listening ? "stop.circle.fill" : "mic.circle.fill")
+  init(log: SessionLog, model: AppModel) {
+    _dictation = StateObject(wrappedValue: NoteDictation(
+      logger: log.logger, hostMicrophoneBusy: { model.inCall }))
   }
-  BugVoiceInputControls(dictation: dictation)
+
+  var body: some View {
+    HStack {
+      TextField("Message", text: $text)
+      Button { dictation.toggle(note: text) { text = $0 } } label: {
+        Image(systemName: dictation.listening ? "stop.circle.fill" : "mic.circle.fill")
+      }
+      BugVoiceInputControls(dictation: dictation)
+    }
+  }
 }
 ```
 
-The pieces are public too: `BugMicrophonePicker(dictation:)` is the menu, and `BugInputLevelMeter(level:)` draws any 0...1 level. `NoteDictation.inputLevel` is the RMS of each captured buffer in dBFS mapped linearly from -60 dB (0) to full scale (1), rising at once and falling smoothly, published about 20 times a second on the main actor, and 0 whenever dictation is not listening. An app with its own capture (not `NoteDictation`) can still draw its level with `BugInputLevelMeter`. These views are iOS only, like the report sheet.
+Two `NoteDictation`s in one app (the app's and the reporter's) must not record at once. Either fold the app's into the reporter's check, `microphoneBusy: { model.inCall || appDictation.listening }`, keeping the app's `NoteDictation` somewhere both can reach, such as the model; or have the app's mic button use the reporter's own, `BugVoiceInputControls(dictation: reporter.dictation)`, so there is only one. Either way the saved microphone (`bugkit.dictation_microphone`) is shared.
+
+The pieces are public too: `BugMicrophonePicker(dictation:)` is the menu, and `BugInputLevelMeter(level:)` draws `NoteDictation.level`, a `DictationInputLevel` whose `value` is the RMS of each captured buffer in dBFS mapped linearly from -60 dB (0) to full scale (1), rising at once and falling smoothly, published about 20 times a second on the main actor, and 0 whenever dictation is not listening. The level is its own observable object so only the meter redraws that often, not every view observing the dictation. An app with its own capture (not `NoteDictation`) can draw its level with `BugInputLevelMeter(value:)`. Each view takes an accessibility identifier (`accessibilityIdentifier:`, or `identifierPrefix:` on the combined view; defaults `voice-input-microphone-picker` and `voice-input-level`). These views are iOS only, like the report sheet.
 
 For Deepgram, keep the vendor key in the app's key store, or have your server issue a short-lived access token:
 
