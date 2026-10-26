@@ -85,7 +85,9 @@ public struct BugInputLevelMeter: View {
     .animation(.linear(duration: 0.05), value: value)
     .accessibilityElement()
     .accessibilityLabel("Input level")
-    .accessibilityValue("\(Int((value * 100).rounded())) percent")
+    // VoiceOver reads tens, not every flicker of the level.
+    .accessibilityValue("\(Int((value * 10).rounded()) * 10) percent")
+    .accessibilityAddTraits(.updatesFrequently)
     .accessibilityIdentifier(identifier)
   }
 }
