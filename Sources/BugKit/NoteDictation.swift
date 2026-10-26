@@ -109,7 +109,12 @@ public struct DictationJoin: Equatable, Sendable {
   /// Microphone picks apply to the next dictation. Stop/Log it drains final words; cancel discards late callbacks.
   @MainActor
   public final class NoteDictation: ObservableObject {
-    @Published public private(set) var listening = false
+    @Published public private(set) var listening = false {
+      didSet { if !listening { meter.reset(); inputLevel = 0 } }
+    }
+    /// How loud the microphone is while listening: 0 (silence) to 1 (full scale), smoothed and updated about 20
+    /// times a second. 0 whenever not listening. `BugInputLevelMeter` draws it.
+    @Published public private(set) var inputLevel = 0.0
     @Published public private(set) var starting = false
     @Published public private(set) var refreshingMicrophones = false
     @Published public private(set) var processing = false
@@ -129,7 +134,8 @@ public struct DictationJoin: Equatable, Sendable {
     private let capture: any DictationCapture
     private let permissions: DictationPermissions
     private let defaults: UserDefaults
-    private let hostMicrophoneBusy: @MainActor () -> Bool
+    let hostMicrophoneBusy: @MainActor () -> Bool
+    private var meter = DictationLevel()
     private var provider: (any BugDictationProvider)?
     private var startTask: Task<Void, Never>?
     private var audioTask: Task<Void, Never>?
@@ -231,6 +237,7 @@ public struct DictationJoin: Equatable, Sendable {
             do {
               for await chunk in audio {
                 try Task.checkCancellation()
+                self?.hear(chunk, generation)
                 try await backend.appendAudio(chunk)
               }
             } catch {
@@ -314,6 +321,12 @@ public struct DictationJoin: Equatable, Sendable {
       Task { await backend?.cancel() }
       listening = false; starting = false; processing = false; refreshingMicrophones = false; onText = nil
       if wasBusy { logger("dictation_stop", ["why": .string(why)]) }
+    }
+
+    private func hear(_ chunk: Data, _ generation: UUID) {
+      guard owner == generation, listening,
+            let level = meter.hear(pcm16: chunk, at: ProcessInfo.processInfo.systemUptime) else { return }
+      inputLevel = level
     }
 
     private func complete(why: String) {

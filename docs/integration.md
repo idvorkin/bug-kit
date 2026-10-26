@@ -212,6 +212,23 @@ Hosts with active recording should return `true` from `microphoneBusy`. BugKit c
 
 The input is a preference: iOS decides the actual route, and headset selection may also change playback routing. A selected mic that disappears is cleared from the picker on refresh. A route change or interruption during capture stops dictation and preserves the note; select the replacement and start again. Switching inputs during a dictation is intentionally disabled. Actual USB/Bluetooth hardware routing needs verification on a device.
 
+### The microphone picker and input level on every voice input
+
+The report dialog shows the microphone menu and a live input level meter under the note. An app with its own voice input built on `NoteDictation` gets the same controls by placing `BugVoiceInputControls(dictation:)` beside its mic button:
+
+```swift
+@StateObject private var dictation = NoteDictation(logger: log.logger, hostMicrophoneBusy: { model.inCall })
+
+HStack {
+  Button { dictation.toggle(note: text) { text = $0 } } label: {
+    Image(systemName: dictation.listening ? "stop.circle.fill" : "mic.circle.fill")
+  }
+  BugVoiceInputControls(dictation: dictation)
+}
+```
+
+The pieces are public too: `BugMicrophonePicker(dictation:)` is the menu, and `BugInputLevelMeter(level:)` draws any 0...1 level. `NoteDictation.inputLevel` is the RMS of each captured buffer in dBFS mapped linearly from -60 dB (0) to full scale (1), rising at once and falling smoothly, published about 20 times a second on the main actor, and 0 whenever dictation is not listening. An app with its own capture (not `NoteDictation`) can still draw its level with `BugInputLevelMeter`. These views are iOS only, like the report sheet.
+
 For Deepgram, keep the vendor key in the app's key store, or have your server issue a short-lived access token:
 
 ```swift

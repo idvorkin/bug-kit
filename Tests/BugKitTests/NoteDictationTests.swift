@@ -236,6 +236,40 @@ import Testing
 }
 
 @MainActor
+@Test func dictationInputLevelRisesWithSoundAndEmptiesWhenListeningEnds() async throws {
+  let fixture = try DictationFixture()
+  defer { fixture.cleanup() }
+  #expect(fixture.dictation.inputLevel == 0)
+  fixture.dictation.toggle(note: "") { fixture.note.value = $0 }
+  try await fixture.until { fixture.dictation.listening }
+  let fullScale = Data((0..<320).flatMap { _ in [UInt8(0xFF), UInt8(0x7F)] })  // Int16.max, little-endian
+  // The meter publishes about 20 times a second, so keep sending until a loud buffer is due.
+  for _ in 0..<40 where fixture.dictation.inputLevel < 0.9 {
+    fixture.capture.send(fullScale)
+    try await Task.sleep(for: .milliseconds(10))
+  }
+  #expect(fixture.dictation.inputLevel > 0.9)
+  #expect(await fixture.dictation.finish(why: "log_it"))
+  #expect(fixture.dictation.inputLevel == 0)
+}
+
+@MainActor
+@Test func dictationInputLevelEmptiesOnCancel() async throws {
+  let fixture = try DictationFixture()
+  defer { fixture.cleanup() }
+  fixture.dictation.toggle(note: "") { fixture.note.value = $0 }
+  try await fixture.until { fixture.dictation.listening }
+  let fullScale = Data((0..<320).flatMap { _ in [UInt8(0xFF), UInt8(0x7F)] })
+  for _ in 0..<40 where fixture.dictation.inputLevel < 0.9 {
+    fixture.capture.send(fullScale)
+    try await Task.sleep(for: .milliseconds(10))
+  }
+  #expect(fixture.dictation.inputLevel > 0.9)
+  fixture.dictation.stop(why: "cancel")
+  #expect(fixture.dictation.inputLevel == 0)
+}
+
+@MainActor
 private final class DictationFixture {
   let capture = TestDictationCapture()
   let provider = TestNoteProvider()
@@ -292,6 +326,7 @@ private final class DictationFixture {
   }
   func stop() { audio?.finish(); audio = nil }
   func restore() { restores += 1 }
+  func send(_ data: Data) { audio?.yield(data) }
 }
 
 private enum TestNoteError: Error { case failed }

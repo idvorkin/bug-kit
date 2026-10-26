@@ -358,7 +358,7 @@
                 Text(dictation.starting ? "Starting voice input…" : "Finishing voice input…")
               }.font(.footnote).foregroundStyle(.secondary)
             }
-            if reporter.options.dictation { microphonePicker }
+            if reporter.options.dictation { BugVoiceInputControls(dictation: dictation) }
             if let problem = dictation.problem {
               if reporter.options.copyableErrors {
                 BugProblemView(
@@ -455,29 +455,6 @@
       .accessibilityLabel(
         dictation.listening ? "Stop dictating" : busy ? "Dictation is off while the microphone is in use" : "Speak the note")
       .accessibilityIdentifier("report-dictate")
-    }
-
-    private var microphonePicker: some View {
-      Menu {
-        Button { dictation.selectMicrophone(nil) } label: {
-          if dictation.selectedMicrophoneID == nil { Label("Automatic", systemImage: "checkmark") }
-          else { Text("Automatic") }
-        }
-        ForEach(dictation.microphones) { microphone in
-          Button { dictation.selectMicrophone(microphone.id) } label: {
-            if dictation.selectedMicrophoneID == microphone.id { Label(microphone.name, systemImage: "checkmark") }
-            else { Text(microphone.name) }
-          }
-        }
-        Button("Refresh microphones") {
-          Task { await dictation.refreshMicrophones() }
-        }
-      } label: {
-        LabeledContent("Microphone", value: dictation.selectedMicrophoneName)
-      }
-      .disabled(dictation.busy || reporter.hooks.microphoneBusy())
-      .accessibilityLabel("Microphone: \(dictation.selectedMicrophoneName)")
-      .accessibilityIdentifier("report-microphone-picker")
     }
 
     private func logIt(another: Bool) {
