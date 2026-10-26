@@ -3,15 +3,20 @@ import SwiftUI
 
 /// The microphone picker and the live input level, for any voice input built on `NoteDictation` (bug-0b9).
 /// Put it beside the app's own mic button; the report dialog shows the same controls under its note.
+/// The picker's accessibility identifier is `<identifierPrefix>-microphone-picker` and the meter's
+/// `<identifierPrefix>-level`.
 public struct BugVoiceInputControls: View {
   @ObservedObject private var dictation: NoteDictation
+  private let identifierPrefix: String
 
-  public init(dictation: NoteDictation) { self.dictation = dictation }
+  public init(dictation: NoteDictation, identifierPrefix: String = "voice-input") {
+    self.dictation = dictation; self.identifierPrefix = identifierPrefix
+  }
 
   public var body: some View {
     HStack(spacing: 12) {
-      BugMicrophonePicker(dictation: dictation)
-      BugInputLevelMeter(level: dictation.inputLevel)
+      BugMicrophonePicker(dictation: dictation, accessibilityIdentifier: "\(identifierPrefix)-microphone-picker")
+      BugInputLevelMeter(level: dictation.level, accessibilityIdentifier: "\(identifierPrefix)-level")
         .frame(width: 64)
     }
   }
@@ -21,8 +26,11 @@ public struct BugVoiceInputControls: View {
 /// off while dictation is busy or the host holds the microphone (`hostMicrophoneBusy`).
 public struct BugMicrophonePicker: View {
   @ObservedObject private var dictation: NoteDictation
+  private let identifier: String
 
-  public init(dictation: NoteDictation) { self.dictation = dictation }
+  public init(dictation: NoteDictation, accessibilityIdentifier: String = "voice-input-microphone-picker") {
+    self.dictation = dictation; identifier = accessibilityIdentifier
+  }
 
   public var body: some View {
     Menu {
@@ -44,31 +52,41 @@ public struct BugMicrophonePicker: View {
     }
     .disabled(dictation.busy || dictation.hostMicrophoneBusy())
     .accessibilityLabel("Microphone: \(dictation.selectedMicrophoneName)")
-    .accessibilityIdentifier("report-microphone-picker")
+    .accessibilityIdentifier(identifier)
   }
 }
 
-/// A horizontal bar for an input level from 0 (empty) to 1 (full scale), such as `NoteDictation.inputLevel`.
-/// It turns orange near full scale, where the voice is about to clip.
+/// A horizontal bar for an input level from 0 (empty) to 1 (full scale). It turns orange near full scale, where the
+/// voice is about to clip. Observing `NoteDictation.level` redraws only the bar, not the views around it.
 public struct BugInputLevelMeter: View {
-  private let level: Double
+  @ObservedObject private var level: DictationInputLevel
+  private let identifier: String
 
-  public init(level: Double) { self.level = min(max(level, 0), 1) }
+  /// A live level, such as `NoteDictation.level`.
+  public init(level: DictationInputLevel, accessibilityIdentifier: String = "voice-input-level") {
+    self.level = level; identifier = accessibilityIdentifier
+  }
+
+  /// A level from the app's own capture, 0...1.
+  public init(value: Double, accessibilityIdentifier: String = "voice-input-level") {
+    self.init(level: DictationInputLevel(value), accessibilityIdentifier: accessibilityIdentifier)
+  }
 
   public var body: some View {
+    let value = min(max(level.value, 0), 1)
     GeometryReader { geometry in
       ZStack(alignment: .leading) {
         Capsule().fill(.quaternary)
-        Capsule().fill(level > 0.9 ? Color.orange : Color.green)
-          .frame(width: geometry.size.width * level)
+        Capsule().fill(value > 0.9 ? Color.orange : Color.green)
+          .frame(width: geometry.size.width * value)
       }
     }
     .frame(height: 6)
-    .animation(.linear(duration: 0.05), value: level)
+    .animation(.linear(duration: 0.05), value: value)
     .accessibilityElement()
     .accessibilityLabel("Input level")
-    .accessibilityValue("\(Int((level * 100).rounded())) percent")
-    .accessibilityIdentifier("voice-input-level")
+    .accessibilityValue("\(Int((value * 100).rounded())) percent")
+    .accessibilityIdentifier(identifier)
   }
 }
 #endif

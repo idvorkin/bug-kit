@@ -239,18 +239,18 @@ import Testing
 @Test func dictationInputLevelRisesWithSoundAndEmptiesWhenListeningEnds() async throws {
   let fixture = try DictationFixture()
   defer { fixture.cleanup() }
-  #expect(fixture.dictation.inputLevel == 0)
+  #expect(fixture.dictation.level.value == 0)
   fixture.dictation.toggle(note: "") { fixture.note.value = $0 }
   try await fixture.until { fixture.dictation.listening }
   let fullScale = Data((0..<320).flatMap { _ in [UInt8(0xFF), UInt8(0x7F)] })  // Int16.max, little-endian
   // The meter publishes about 20 times a second, so keep sending until a loud buffer is due.
-  for _ in 0..<40 where fixture.dictation.inputLevel < 0.9 {
+  for _ in 0..<40 where fixture.dictation.level.value < 0.9 {
     fixture.capture.send(fullScale)
     try await Task.sleep(for: .milliseconds(10))
   }
-  #expect(fixture.dictation.inputLevel > 0.9)
+  #expect(fixture.dictation.level.value > 0.9)
   #expect(await fixture.dictation.finish(why: "log_it"))
-  #expect(fixture.dictation.inputLevel == 0)
+  #expect(fixture.dictation.level.value == 0)
 }
 
 @MainActor
@@ -260,13 +260,28 @@ import Testing
   fixture.dictation.toggle(note: "") { fixture.note.value = $0 }
   try await fixture.until { fixture.dictation.listening }
   let fullScale = Data((0..<320).flatMap { _ in [UInt8(0xFF), UInt8(0x7F)] })
-  for _ in 0..<40 where fixture.dictation.inputLevel < 0.9 {
+  for _ in 0..<40 where fixture.dictation.level.value < 0.9 {
     fixture.capture.send(fullScale)
     try await Task.sleep(for: .milliseconds(10))
   }
-  #expect(fixture.dictation.inputLevel > 0.9)
+  #expect(fixture.dictation.level.value > 0.9)
   fixture.dictation.stop(why: "cancel")
-  #expect(fixture.dictation.inputLevel == 0)
+  #expect(fixture.dictation.level.value == 0)
+}
+
+@MainActor
+@Test func dictationAudioDrainedAfterFinishBeginsLeavesTheLevelEmpty() async throws {
+  let fixture = try DictationFixture()
+  defer { fixture.cleanup() }
+  fixture.dictation.toggle(note: "") { fixture.note.value = $0 }
+  try await fixture.until { fixture.dictation.listening }
+  // Past the throttle interval, so the next loud buffer would be published if it were heard.
+  try await Task.sleep(for: .milliseconds(80))
+  let fullScale = Data((0..<320).flatMap { _ in [UInt8(0xFF), UInt8(0x7F)] })
+  // Queued with no suspension before finish: the audio loop drains them after listening has ended.
+  for _ in 0..<5 { fixture.capture.send(fullScale) }
+  #expect(await fixture.dictation.finish(why: "log_it"))
+  #expect(fixture.dictation.level.value == 0)
 }
 
 @MainActor

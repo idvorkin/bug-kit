@@ -105,16 +105,25 @@ public struct DictationJoin: Equatable, Sendable {
   import Combine
   import Speech
 
+  /// The microphone's live input level: 0 (silence) to 1 (full scale), smoothed and updated about 20 times a second
+  /// while listening, and 0 whenever not listening.
+  @MainActor
+  public final class DictationInputLevel: ObservableObject {
+    @Published public private(set) var value: Double
+    init(_ value: Double = 0) { self.value = value }
+    func set(_ value: Double) { if self.value != value { self.value = value } }
+  }
+
   /// Dictates through Apple Speech by default, or an app-supplied streaming provider.
   /// Microphone picks apply to the next dictation. Stop/Log it drains final words; cancel discards late callbacks.
   @MainActor
   public final class NoteDictation: ObservableObject {
     @Published public private(set) var listening = false {
-      didSet { if !listening { meter.reset(); inputLevel = 0 } }
+      didSet { if !listening { meter.reset(); level.set(0) } }
     }
-    /// How loud the microphone is while listening: 0 (silence) to 1 (full scale), smoothed and updated about 20
-    /// times a second. 0 whenever not listening. `BugInputLevelMeter` draws it.
-    @Published public private(set) var inputLevel = 0.0
+    /// How loud the microphone is while listening, in its own object so only the meter redraws 20 times a second,
+    /// not every view that observes the dictation. `BugInputLevelMeter(level:)` draws it.
+    public let level = DictationInputLevel()
     @Published public private(set) var starting = false
     @Published public private(set) var refreshingMicrophones = false
     @Published public private(set) var processing = false
@@ -325,8 +334,8 @@ public struct DictationJoin: Equatable, Sendable {
 
     private func hear(_ chunk: Data, _ generation: UUID) {
       guard owner == generation, listening,
-            let level = meter.hear(pcm16: chunk, at: ProcessInfo.processInfo.systemUptime) else { return }
-      inputLevel = level
+            let value = meter.hear(pcm16: chunk, at: ProcessInfo.processInfo.systemUptime) else { return }
+      level.set(value)
     }
 
     private func complete(why: String) {

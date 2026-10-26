@@ -358,7 +358,7 @@
                 Text(dictation.starting ? "Starting voice input…" : "Finishing voice input…")
               }.font(.footnote).foregroundStyle(.secondary)
             }
-            if reporter.options.dictation { BugVoiceInputControls(dictation: dictation) }
+            if reporter.options.dictation { BugVoiceInputControls(dictation: dictation, identifierPrefix: "report") }
             if let problem = dictation.problem {
               if reporter.options.copyableErrors {
                 BugProblemView(
