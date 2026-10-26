@@ -292,6 +292,45 @@ With dictation enabled, the report offers Automatic and an explicit “Refresh m
 
 Host coverage (Foundation, `swift test`): `DictationProviderTests.swift` verifies transport, Deepgram handshake credentials, segment revisions, final flushing and cancellation. iOS simulator coverage (`Tests/iOS` bundle): `NoteDictationTests.swift` uses fake iOS capture/permissions to verify selected input, a saved microphone shown before any explicit refresh, no microphone discovery or capture while the host records (including when it starts recording during permission or provider startup), Apple's quiet end after Stop, final text before save, no saved report when dictation on an empty note fails or hears nothing, permission cancellation, service failure, disappeared-input fallback, and that discovery stays active only for plain ambient/`.mixWithOthers` hosts. Physical mic routes and live vendor transcription need separate device/service verification.
 
+### See the input level, and choose the microphone, on every voice input
+
+**From:** Igor, 2026-10-26: "When we're doing voice input can we make sure to be able to have a mic selector and
+then see the audio input levels? This should probably be on every voice input."
+**Issues:** beads bug-0b9
+**Status:** PR #99 (1d88f6b, 7e737a6, fb02ef1). The level arithmetic (silence, full scale, the dB mapping,
+smoothing, about 20 updates a second, a peak between updates) is verified on the host by `DictationLevelTests`. The
+level rising with sound and returning to empty on finish, on cancel, and for audio drained after finish begins is
+verified in the iOS simulator by `NoteDictationTests`. The controls and the integration example are verified by
+typecheck. A real voice moving the meter, and the controls on screen, are device checks still to do.
+
+- **As someone** speaking a note or a message into any of the apps
+- **I want to** see a level that moves with my voice, and choose the microphone right beside the mic button
+- **so that** I know at once whether I am heard, and by which microphone, before I say a whole sentence to nothing
+
+- **Scenario:** The level moves with my voice
+- **Given:** dictation is on and I tap the microphone
+- **When:** I speak, then stop
+- **Then:**
+  - the meter rises as I speak and falls back smoothly when I stop, without flicker;
+  - it redraws about fifteen to twenty times a second, not once per audio buffer;
+  - silence reads as empty and a full-scale signal as full.
+
+- **Scenario:** Not listening
+- **Given:** voice input is stopped, finishing, cancelled or failed
+- **Then:** the meter is empty.
+
+- **Scenario:** The same controls in every app
+- **Given:** an app with its own voice input button built on BugKit's dictation
+- **When:** it puts BugKit's voice input controls beside its button
+- **Then:** it shows the same level meter and the same microphone picker as the report dialog (Automatic, the inputs
+  iOS offers, Refresh microphones), with the same rules: a pick applies to the next dictation, and the picker is off
+  while listening or while the app holds the microphone.
+
+- **Scenario:** The report dialog
+- **Given:** `options.dictation` is on
+- **When:** the report dialog opens
+- **Then:** the microphone picker and the level meter sit under the note.
+
 ### Report private-text apps without automatic screen images
 
 With `captureScreenshots = false`, opening a report and launch-hook saving skip the renderer. The issue note and app-provided state still save; automatic screen images are neither displayed nor written. The default remains capture enabled. `ScreenshotPrivacyTests` verifies the lazy capture gate and persisted metadata on the host; its iOS-only case drives the real sheet and launch hook. Dictation, accessibility and interaction recording remain separately configurable.

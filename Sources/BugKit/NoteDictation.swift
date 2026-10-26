@@ -105,11 +105,25 @@ public struct DictationJoin: Equatable, Sendable {
   import Combine
   import Speech
 
+  /// The microphone's live input level: 0 (silence) to 1 (full scale), smoothed and updated about 20 times a second
+  /// while listening, and 0 whenever not listening.
+  @MainActor
+  public final class DictationInputLevel: ObservableObject {
+    @Published public private(set) var value: Double
+    init(_ value: Double = 0) { self.value = value }
+    func set(_ value: Double) { if self.value != value { self.value = value } }
+  }
+
   /// Dictates through Apple Speech by default, or an app-supplied streaming provider.
   /// Microphone picks apply to the next dictation. Stop/Log it drains final words; cancel discards late callbacks.
   @MainActor
   public final class NoteDictation: ObservableObject {
-    @Published public private(set) var listening = false
+    @Published public private(set) var listening = false {
+      didSet { if !listening { meter.reset(); level.set(0) } }
+    }
+    /// How loud the microphone is while listening, in its own object so only the meter redraws 20 times a second,
+    /// not every view that observes the dictation. `BugInputLevelMeter(level:)` draws it.
+    public let level = DictationInputLevel()
     @Published public private(set) var starting = false
     @Published public private(set) var refreshingMicrophones = false
     @Published public private(set) var processing = false
@@ -129,7 +143,8 @@ public struct DictationJoin: Equatable, Sendable {
     private let capture: any DictationCapture
     private let permissions: DictationPermissions
     private let defaults: UserDefaults
-    private let hostMicrophoneBusy: @MainActor () -> Bool
+    let hostMicrophoneBusy: @MainActor () -> Bool
+    private var meter = DictationLevel()
     private var provider: (any BugDictationProvider)?
     private var startTask: Task<Void, Never>?
     private var audioTask: Task<Void, Never>?
@@ -231,6 +246,7 @@ public struct DictationJoin: Equatable, Sendable {
             do {
               for await chunk in audio {
                 try Task.checkCancellation()
+                self?.hear(chunk, generation)
                 try await backend.appendAudio(chunk)
               }
             } catch {
@@ -314,6 +330,12 @@ public struct DictationJoin: Equatable, Sendable {
       Task { await backend?.cancel() }
       listening = false; starting = false; processing = false; refreshingMicrophones = false; onText = nil
       if wasBusy { logger("dictation_stop", ["why": .string(why)]) }
+    }
+
+    private func hear(_ chunk: Data, _ generation: UUID) {
+      guard owner == generation, listening,
+            let value = meter.hear(pcm16: chunk, at: ProcessInfo.processInfo.systemUptime) else { return }
+      level.set(value)
     }
 
     private func complete(why: String) {
