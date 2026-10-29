@@ -197,7 +197,9 @@ public struct BugReportWriter: Sendable {
       do { try await delivery.enqueue(report, documents: store.documents) }
       catch {
         logger("error", ["where": "bug_delivery_enqueue", "id": .string(report.id.uuidString),
-                         "message": "Cloud delivery is pending; the report remains local."])
+                         "message": CloudReportOutbox.skipReason(error) == nil
+                           ? "Cloud delivery is pending; the report remains local."
+                           : "Cloud delivery gave up on this report (bug_delivery_skipped); it remains local."])
       }
     }
     return (report, indexWritten)

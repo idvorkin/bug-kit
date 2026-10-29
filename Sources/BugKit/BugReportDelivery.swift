@@ -233,11 +233,41 @@ actor CloudReportOutbox: BugReportDelivery {
 
   private var pending: URL { root.appendingPathComponent("pending") }
   private var sent: URL { root.appendingPathComponent("sent") }
+  /// Give-up markers: `skipped/<id>.json` for a report whose evidence can never be staged (over the limits, or a
+  /// path outside the store). The report stays local; without the marker every launch and foreground would ask
+  /// CloudKit for the account again just to fail staging it.
+  private var skipped: URL { root.appendingPathComponent("skipped") }
+  private func isSkipped(_ id: UUID) -> Bool {
+    FileManager.default.fileExists(atPath: skipped.appendingPathComponent(id.uuidString + ".json").path)
+  }
+
+  /// Staging errors no retry can fix. A missing file is not one: it may still be written (a report can name
+  /// evidence that lands after it).
+  static func skipReason(_ error: any Error) -> String? {
+    switch error as? CloudDeliveryError {
+    case .tooLarge: return "too_large"
+    case .invalidPath: return "invalid_path"
+    default: return nil
+    }
+  }
+
   private func stage(_ report: BugReport) throws {
     let name = report.id.uuidString + ".json"
     guard !FileManager.default.fileExists(atPath: sent.appendingPathComponent(name).path),
-          !FileManager.default.fileExists(atPath: pending.appendingPathComponent(name).path) else { return }
-    let data = try CloudReportPayload.capture(report, documents: store.documents).encoded()
+          !FileManager.default.fileExists(atPath: pending.appendingPathComponent(name).path),
+          !isSkipped(report.id) else { return }
+    let data: Data
+    do { data = try CloudReportPayload.capture(report, documents: store.documents).encoded() }
+    catch {
+      if let reason = Self.skipReason(error) {
+        try? FileManager.default.createDirectory(at: skipped, withIntermediateDirectories: true)
+        try? JSONEncoder().encode(["reason": reason, "at": BugReport.formatDate(Date())])
+          .write(to: skipped.appendingPathComponent(name), options: .atomic)
+        logger("bug_delivery_skipped", ["id": .string(report.id.uuidString), "transport": "cloudkit",
+                                        "reason": .string(reason)])
+      }
+      throw error
+    }
     try FileManager.default.createDirectory(at: pending, withIntermediateDirectories: true)
     try data.write(to: pending.appendingPathComponent(name), options: .atomic)
   }
@@ -252,7 +282,7 @@ actor CloudReportOutbox: BugReportDelivery {
     return try await task.value
   }
 
-  /// Something is queued, or a report saved since opt-in has not been sent yet.
+  /// Something is queued, or a report saved since opt-in has not been sent or given up on yet.
   private func hasWork() throws -> Bool {
     let queued = (try? FileManager.default.contentsOfDirectory(atPath: pending.path)) ?? []
     if queued.contains(where: { $0.hasSuffix(".json") }) { return true }
@@ -260,6 +290,7 @@ actor CloudReportOutbox: BugReportDelivery {
     return try store.readAll().reports.contains { report in
       !preexisting.contains(report.id.uuidString)
         && !FileManager.default.fileExists(atPath: sent.appendingPathComponent(report.id.uuidString + ".json").path)
+        && !isSkipped(report.id)
     }
   }
 
@@ -278,10 +309,10 @@ actor CloudReportOutbox: BugReportDelivery {
     let preexisting = try preexistingReports()
     for report in try store.readAll().reports where !preexisting.contains(report.id.uuidString) {
       do { try stage(report) }
-      catch {
+      catch let error where Self.skipReason(error) == nil {
         logger("bug_delivery_pending", ["id": .string(report.id.uuidString), "transport": "cloudkit",
                                         "reason": "evidence could not be staged"])
-      }
+      } catch {}  // given up on: `stage` wrote the marker and logged `bug_delivery_skipped`
     }
     var count = 0
     var evidenceError: (any Error)?

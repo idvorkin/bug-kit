@@ -375,6 +375,93 @@ private extension CloudFixture {
   }
 }
 
+@Test func aReportThatCanNeverBeStagedIsSkippedOnceAndStopsAskingCloudKit() async throws {
+  // Over the limits forever: without a give-up marker every launch and foreground paid an account round trip.
+  let f = CloudFixture(); defer { f.clean() }
+  let transport = FakeCloudTransport()
+  let events = CloudEvents()
+  let queue = CloudReportOutbox(store: f.store, root: f.outboxRoot, transport: transport, logger: events.logger)
+  #expect(try await queue.flush() == 0)  // opted in before the report
+  var huge = try f.report(); huge.files = (0...100).map { "bugs/sample/part-\($0).bin" }  // 101 > 100 attachments
+  try f.store.append(huge)
+  #expect(try await queue.flush() == 0)
+  let marker = f.outboxRoot.appendingPathComponent("skipped/\(huge.id.uuidString).json")
+  #expect(FileManager.default.fileExists(atPath: marker.path))
+  let skips = { events.all.filter { $0.0 == "bug_delivery_skipped" } }
+  #expect(skips().count == 1 && skips().first?.1["reason"] == .string("too_large"))
+  let checks = await transport.checks()
+  #expect(try await f.outbox(transport).flush() == 0)  // a later launch
+  #expect(await transport.checks() == checks)
+  #expect(skips().count == 1)
+  #expect(try f.store.readAll().reports.map(\.id) == [huge.id])  // the report itself stays local
+  let next = try f.report(); try f.store.append(next)
+  #expect(try await queue.flush() == 1)
+  #expect(await transport.data(next.id) != nil)
+  #expect(await transport.data(huge.id) == nil)
+}
+
+@Test func evidenceOutsideTheStoreIsSkippedOnceAsInvalidPath() async throws {
+  let f = CloudFixture(); defer { f.clean() }
+  let transport = FakeCloudTransport()
+  let events = CloudEvents()
+  let queue = CloudReportOutbox(store: f.store, root: f.outboxRoot, transport: transport, logger: events.logger)
+  #expect(try await queue.flush() == 0)
+  var escaped = try f.report(); escaped.files = ["../outside.txt"]
+  try f.store.append(escaped)
+  #expect(try await queue.flush() == 0)
+  let marker = f.outboxRoot.appendingPathComponent("skipped/\(escaped.id.uuidString).json")
+  #expect(try JSONDecoder().decode([String: String].self, from: Data(contentsOf: marker))["reason"] == "invalid_path")
+  let checks = await transport.checks()
+  #expect(try await f.outbox(transport).flush() == 0)  // a later launch
+  #expect(await transport.checks() == checks)
+  #expect(events.all.filter { $0.0 == "bug_delivery_skipped" }.count == 1)
+  #expect(!events.all.contains { $0.0 == "bug_delivery_pending" })
+}
+
+@Test func evidenceOverTheByteBudgetIsSkippedAsTooLarge() async throws {
+  // docs/integration.md: at most 20 MB of evidence per report. A sparse file keeps the test cheap.
+  let f = CloudFixture(); defer { f.clean() }
+  let transport = FakeCloudTransport()
+  let queue = f.outbox(transport)
+  #expect(try await queue.flush() == 0)
+  var big = try f.report(); big.files = ["bugs/sample/big.bin"]
+  let url = f.documents.appendingPathComponent("bugs/sample/big.bin")
+  FileManager.default.createFile(atPath: url.path, contents: nil)
+  let handle = try FileHandle(forWritingTo: url); try handle.truncate(atOffset: 21_000_000); try handle.close()
+  try f.store.append(big)
+  #expect(try await queue.flush() == 0)
+  let marker = f.outboxRoot.appendingPathComponent("skipped/\(big.id.uuidString).json")
+  #expect(try JSONDecoder().decode([String: String].self, from: Data(contentsOf: marker))["reason"] == "too_large")
+  #expect(await transport.data(big.id) == nil)
+}
+
+@Test func writerNamesAGivenUpReportDifferentlyFromAPendingOne() async throws {
+  let f = CloudFixture(); defer { f.clean() }
+  let transport = FakeCloudTransport()
+  let events = CloudEvents()
+  let queue = CloudReportOutbox(store: f.store, root: f.outboxRoot, transport: transport, logger: events.logger)
+  try await queue.prepare(documents: f.documents)
+  #expect(try await queue.flush() == 0)
+  let writer = BugReportWriter(store: f.store,
+    info: BugAppInfo(app: "fixture", bundle: "local.fixture", build: "1", commit: "fixture", device: "synthetic"),
+    logger: events.logger, delivery: queue)
+  let huge = await writer.save(note: "huge", screen: "home", context: [:], screenshotPNG: nil, log: nil,
+    extraFiles: { folder in
+      try (0...100).map { i in
+        let name = "part-\(i).bin"; try Data("x".utf8).write(to: folder.appendingPathComponent(name)); return name }
+    })
+  let missing = await writer.save(note: "missing", screen: "home", context: [:], screenshotPNG: nil, log: nil,
+    extraFiles: { _ in ["not-there.txt"] })
+  await queue.stop()
+  func message(_ id: UUID) -> JSONValue? {
+    events.all.first { $0.0 == "error" && $0.1["where"] == .string("bug_delivery_enqueue")
+      && $0.1["id"] == .string(id.uuidString) }?.1["message"]
+  }
+  #expect(message(huge.id) == .string("Cloud delivery gave up on this report (bug_delivery_skipped); it remains local."))
+  #expect(message(missing.id) == .string("Cloud delivery is pending; the report remains local."))
+  #expect(try f.store.readAll().reports.map(\.id) == [huge.id, missing.id])
+}
+
 @Test func reportsSavedBeforeOptInStayLocalWhileLaterReportsRecoverAfterRestart() async throws {
   let f = CloudFixture(); defer { f.clean() }
   let transport = FakeCloudTransport()

@@ -419,8 +419,10 @@ retries still need a later app execution opportunity. A failed save that never s
 guaranteed to reach the Mac while the app remains suspended. Test that case on the device; do not infer it from
 a local success message.
 
-Missing/oversized evidence stays local and logs `bug_delivery_pending`, without keeping retries alive; the
-next `start()` or save tries again. A corrupt queued payload or permanent configuration error logs
+Missing evidence stays local and logs `bug_delivery_pending`, without keeping retries alive; the next `start()`
+or save tries again. Evidence that can never be staged (over the limits below, or a path outside the store) is
+given up on once: the outbox writes `skipped/<id>.json` with the reason, logs `bug_delivery_skipped`, and no
+later launch contacts CloudKit for it. The report stays local for the device pull. A corrupt queued payload or permanent configuration error logs
 `bug_delivery_stopped` and needs attention. Limits: 100 attachments, 20 MB total unencoded evidence, 30 MB
 encoded asset. Large video reports use the local/device fallback; trim evidence before saving if cloud delivery
 is required. Account bindings prevent silently delivering an old outbox into a different iCloud account.
