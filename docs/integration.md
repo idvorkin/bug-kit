@@ -117,6 +117,12 @@ For Apple dictation, add `NSSpeechRecognitionUsageDescription` and `NSMicrophone
      `### User Story NNN:` heading in that file and links to `stories.md#user-story-NNN`.
      Other Markdown files with no story headings are ignored. `--stories` takes a directory.
    - Without git history it writes an empty feed and never fails the build.
+   - `--fixed-reports` adds "Fixed in this build". The script reads the repo's issues with one `gh issue list`
+     (20 s cap). A change whose commit closes an issue (`Fixes #12`) then carries that issue's bug-report ids
+     (`<!-- bug-id:… -->`, which bug-listener writes). On the device, pass the reports to the views and each one
+     shows its own fixed reports: `WhatsNewRow(feed: whatsNew, reports: reports, …)` and
+     `WhatsNewView(feed: whatsNew, reports: reports, …)` with
+     `let reports = (try? BugStore().readAll().reports) ?? []`. Without `gh`, auth or network, the feed simply has none.
    - The phase reads `.git` and writes into the bundle; the existing recipe sets
      `ENABLE_USER_SCRIPT_SANDBOXING: NO` on the app target.
 

@@ -103,6 +103,32 @@ Part of the [BugKit stories](README.md). What's new was built in Context Grabber
   - the app's settings still open the list;
   - the log has `ui` dismiss_whats_new.
 
+### User Story 034:
+
+- **Summary:** "Fixed in this build" shows the person their own report, under the change that fixed it
+- **From:** BugKit review 2026-10-26 (V1)
+- **Status:** `WhatsNewTests` covers it on the host (closing keywords, issue markers, the feed, the device match); typecheck in CI. A device check is still owed: a build with `--fixed-reports` after a `Fixes #N` commit.
+
+#### Use Case:
+- **As someone** who shook the phone to report a problem
+- **I want to** see, in the build that fixes it, my own words and the day I reported it
+- **so that** reporting has a visible consequence, and I know what to try again
+
+#### Acceptance Criteria:
+- **Scenario:** A fix for my report
+- **Given:** the build phase runs `whats-new.sh --fixed-reports`, and a commit in the window says `Fixes #12`, where issue #12 carries my report's `<!-- bug-id:… -->` marker
+- **When:** I open What's new on the device that made the report
+- **Then:**
+  - the change shows "Fixed in this build: “<my note's first line>” (<the day I reported it>)";
+  - the home row reads "What's new · Fixed in this build: “<my note>”", for the build that fixed it only: whether or not I dismissed the row, a later build's row names its own newest change unless it fixed another of my reports (`WhatsNewSeen.fixedEarlier`, `testAFixFromAnEarlierBuildIsNotHeadlinedAgain`);
+  - `ui` open_whats_new logs `fixed_reports`;
+  - another device, without that report, shows the change as usual;
+  - nothing leaves the device: the match is against its own `bugs.jsonl`.
+
+- **Scenario:** No `gh`
+- **Given:** `gh` is missing, signed out or offline, or takes over 20 seconds
+- **Then:** the feed is built without fixed reports and the build does not fail
+
 ### Reset dismissal for a test launch
 
 **Issues:** #16

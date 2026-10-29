@@ -14,6 +14,108 @@ final class WhatsNewTests: XCTestCase {
     let feed = WhatsNewFeed(generated: "2026-10-10", days: [])
     _ = WhatsNewView(feed: feed, logger: { _, _ in })
     _ = WhatsNewRow(feed: feed, logger: { _, _ in }, open: {})
+    _ = WhatsNewView(feed: feed, reports: [], logger: { _, _ in })
+    _ = WhatsNewRow(feed: feed, reports: [], logger: { _, _ in }, open: {})
+  }
+
+  // MARK: Fixed in this build (review V1): the person's own report, shown back under the change that fixed it.
+
+  private let fixedID = UUID(uuidString: "6F1C2A3B-0000-4000-8000-00000000000A")!
+  private let otherID = UUID(uuidString: "6F1C2A3B-0000-4000-8000-00000000000B")!
+
+  private func report(_ id: UUID, note: String, at iso: String) -> BugReport {
+    BugReport(id: id, reportedAt: at(iso), app: "fixture", bundle: "local.fixture", build: "1", commit: "c",
+              device: "synthetic", screen: "home", note: note, folder: "bugs/x")
+  }
+
+  func testClosingKeywordsNameTheIssuesACommitFixes() {
+    XCTAssertEqual(
+      WhatsNew.closedIssues(subject: "Fix the timer (#12)", body: "Fixes #12\nCloses: #3 and resolved #7; see #9"),
+      [12, 3, 7])
+    XCTAssertEqual(WhatsNew.closedIssues(subject: "Story 147: a cog", body: "Refs #4"), [])
+  }
+
+  func testTheIssueListGivesEachIssuesReportIDs() {
+    let json = #"""
+      [{"number": 12, "body": "> note\n<!-- bug:2026-10-10T15:00:00Z -->\n<!-- bug-id:6f1c2a3b-0000-4000-8000-00000000000a -->"},
+       {"number": 13, "body": null}, {"number": 14, "body": "<!-- bug:2026-10-10T15:00:00Z -->"}]
+      """#
+    XCTAssertEqual(WhatsNew.reportsByIssue(fromIssueList: Data(json.utf8)), [12: [fixedID.uuidString]])
+    XCTAssertEqual(WhatsNew.reportsByIssue(fromIssueList: Data("not json".utf8)), [:])
+  }
+
+  func testAChangeCarriesTheReportsEveryCommitOfItsDayFixed() {
+    let commits = [
+      WhatsNew.Commit(sha: "d", date: at("2026-10-06T17:00:00Z"), subject: "Story 147: the timer keeps counting",
+                      body: "Fixes #12"),
+      WhatsNew.Commit(sha: "c", date: at("2026-10-06T16:00:00Z"), subject: "Story 147: and on resume", body: "Closes #13"),
+      WhatsNew.Commit(sha: "b", date: at("2026-10-06T15:00:00Z"), subject: "Card opens the trainer (story 133)"),
+    ]
+    let a = fixedID.uuidString, b = otherID.uuidString
+    let items = WhatsNew.build(
+      commits: commits, stories: [:], reportsByIssue: [12: [a], 13: [b, a]], now: at("2026-10-06T20:00:00Z"),
+      timeZone: la
+    ).first?.items ?? []
+    XCTAssertEqual(items.map(\.sha), ["d", "b"])
+    XCTAssertEqual(items[0].fixedReports, [a, b])
+    XCTAssertNil(items[1].fixedReports)
+    let without = WhatsNew.build(commits: commits, stories: [:], now: at("2026-10-06T20:00:00Z"), timeZone: la)
+    XCTAssertNil(without.first?.items.first?.fixedReports, "a build that did not look carries nothing")
+  }
+
+  func testAFixFromAnEarlierBuildIsNotHeadlinedAgain() throws {
+    let seen = WhatsNewSeen(defaults: try XCTUnwrap(UserDefaults(suiteName: "bugkit-test-\(UUID().uuidString)")))
+    let mine = report(fixedID, note: "the timer stopped", at: "2026-10-10T18:00:00Z")
+    let other = report(otherID, note: "digits too small", at: "2026-10-11T18:00:00Z")
+    let a = fixedID.uuidString
+    // Build 1: "a" (story 147) fixes my report, then "b" (story 148) the same day.
+    let build1 = WhatsNewFeed(generated: "", days: [.init(day: "2026-10-12", items: [
+      .init(story: 148, text: "Bigger digits", sha: "b"),
+      .init(story: 147, text: "The timer keeps counting", sha: "a", fixedReports: [a]),
+    ])])
+    XCTAssertEqual(WhatsNewFix.homeLine(build1, reports: [mine], fixedEarlier: seen.fixedEarlier(build1)),
+                   "Fixed in this build: “the timer stopped”")
+    XCTAssertEqual(WhatsNewFix.homeLine(build1, reports: [mine], fixedEarlier: seen.fixedEarlier(build1)),
+                   "Fixed in this build: “the timer stopped”", "the whole build headlines it, not just its first look")
+    // Build 2, never dismissed: "c" on story 147 the same day folds "a"'s fix into a line now ahead of "b".
+    let build2 = WhatsNewFeed(generated: "", days: [.init(day: "2026-10-12", items: [
+      .init(story: 147, text: "The timer keeps counting", sha: "c", fixedReports: [a]),
+      .init(story: 148, text: "Bigger digits", sha: "b"),
+    ])])
+    XCTAssertEqual(WhatsNewFix.homeLine(build2, reports: [mine], fixedEarlier: seen.fixedEarlier(build2)),
+                   "Oct 12 — The timer keeps counting")
+    XCTAssertEqual(build2.fixes(in: [mine]).count, 1, "the list still shows the fix under its change")
+    // Build 3 fixes another of my reports: that one is headlined, the old one still is not.
+    let build3 = WhatsNewFeed(generated: "", days: [
+      .init(day: "2026-10-13", items: [.init(story: 149, text: "Larger type", sha: "d", fixedReports: [otherID.uuidString])]),
+      build2.days[0],
+    ])
+    XCTAssertEqual(WhatsNewFix.homeLine(build3, reports: [mine, other], fixedEarlier: seen.fixedEarlier(build3)),
+                   "Fixed in this build: “digits too small”")
+  }
+
+  func testTheDeviceShowsOnlyItsOwnFixedReports() {
+    let item = WhatsNewItem(
+      story: 147, text: "The timer keeps counting", sha: "d", fixedReports: [fixedID.uuidString, UUID().uuidString])
+    let feed = WhatsNewFeed(generated: "", days: [.init(day: "2026-10-12", items: [item])])
+    let mine = report(fixedID, note: "  \nthe timer stopped when I opened settings\nand more", at: "2026-10-10T18:00:00Z")
+    let unrelated = report(otherID, note: "something else", at: "2026-10-11T18:00:00Z")
+    let fixes = feed.fixes(in: [unrelated, mine])
+    XCTAssertEqual(fixes.map(\.note), ["the timer stopped when I opened settings"])
+    XCTAssertEqual(fixes.first?.line(timeZone: la), "Fixed in this build: “the timer stopped when I opened settings” (Oct 10)")
+    XCTAssertEqual(WhatsNewFix.homeLine(feed, reports: [mine]), "Fixed in this build: “the timer stopped when I opened settings”")
+    XCTAssertEqual(WhatsNewFix.homeLine(feed, reports: [unrelated]), "Oct 12 — The timer keeps counting")
+    XCTAssertEqual(item.fixes(in: [report(fixedID, note: " ", at: "2026-10-10T18:00:00Z")]), [], "no note, no line")
+    let long = report(fixedID, note: String(repeating: "x", count: 120), at: "2026-10-10T18:00:00Z")
+    XCTAssertEqual(item.fixes(in: [long]).first?.note.count, 80)
+  }
+
+  func testFixedReportsRoundTripAndAnOlderFeedStillDecodes() throws {
+    let feed = WhatsNewFeed(
+      generated: "", days: [.init(day: "2026-10-05", items: [.init(story: 1, text: "A", sha: "a", fixedReports: ["X"])])])
+    XCTAssertEqual(WhatsNewFeed.decode(try JSONEncoder().encode(feed)), feed)
+    let older = #"{"generated": "", "days": [{"day": "2026-10-05", "items": [{"story": 1, "text": "A", "sha": "a"}]}]}"#
+    XCTAssertNil(WhatsNewFeed.decode(Data(older.utf8))?.days.first?.items.first?.fixedReports)
   }
 
   func testSubjectsThatStartWithTheirStory() {

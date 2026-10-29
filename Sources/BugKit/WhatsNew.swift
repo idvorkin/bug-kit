@@ -13,13 +13,18 @@ public struct WhatsNewItem: Codable, Equatable, Sendable {
   /// The story on GitHub, at its own heading (#232). Nil when the build found no such story, or in a feed from an
   /// older build.
   public var link: String?
+  /// The bug reports this change fixed: the `<!-- bug-id:… -->` markers of the issues its commits close
+  /// ("Fixes #N"), uppercase UUIDs. The device shows its own reports among them as "Fixed in this build". Nil when
+  /// it fixed none, or the build did not look (`whats-new.sh` without `--fixed-reports`, or no `gh`).
+  public var fixedReports: [String]?
 
-  public init(story: Int, text: String, issue: Int? = nil, sha: String, link: String? = nil) {
+  public init(story: Int, text: String, issue: Int? = nil, sha: String, link: String? = nil, fixedReports: [String]? = nil) {
     self.story = story
     self.text = text
     self.issue = issue
     self.sha = sha
     self.link = link
+    self.fixedReports = fixedReports
   }
 
   /// "Story 133 · #142", the small line under a change.
@@ -221,13 +226,45 @@ public enum WhatsNew {
     return out.filter { !$0.value.summary.isEmpty }
   }
 
+  // MARK: Fixed reports
+
+  private static let closingIssue = try! NSRegularExpression(
+    pattern: #"\b(?:fix(?:e[sd])?|close[sd]?|resolve[sd]?)\s*:?\s+#(\d+)"#, options: [.caseInsensitive])
+  private static let bugIDMarker = try! NSRegularExpression(
+    pattern: #"<!-- bug-id:([0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}) -->"#)
+
+  /// The issues a commit closes in GitHub's own words: "Fixes #12", "closes #3", "Resolved: #7".
+  public static func closedIssues(subject: String, body: String) -> [Int] {
+    let text = subject + "\n" + body
+    var out: [Int] = []
+    for m in closingIssue.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
+      if let n = group(m, 1, text).flatMap(Int.init), !out.contains(n) { out.append(n) }
+    }
+    return out
+  }
+
+  /// `gh issue list --json number,body` → each issue's bug-report ids, from the markers bug-listener writes.
+  /// Empty for anything unreadable: the feed then just has no fixed reports.
+  public static func reportsByIssue(fromIssueList data: Data) -> [Int: [String]] {
+    struct Issue: Decodable { let number: Int; let body: String? }
+    guard let issues = try? JSONDecoder().decode([Issue].self, from: data) else { return [:] }
+    var out: [Int: [String]] = [:]
+    for issue in issues {
+      let body = issue.body ?? ""
+      let ids = bugIDMarker.matches(in: body, range: NSRange(body.startIndex..., in: body))
+        .compactMap { group($0, 1, body)?.uppercased() }
+      if !ids.isEmpty { out[issue.number] = ids }
+    }
+    return out
+  }
+
   // MARK: The feed
 
   /// Commits newest first (as `git log` gives them) → days newest first, one line per story per day, within
   /// `days` days of `now`.
   public static func build(
-    commits: [Commit], stories: [Int: Story], issueStories: [Int: Int] = [:], now: Date, days: Int = 30,
-    timeZone: TimeZone = .current
+    commits: [Commit], stories: [Int: Story], issueStories: [Int: Int] = [:], reportsByIssue: [Int: [String]] = [:],
+    now: Date, days: Int = 30, timeZone: TimeZone = .current
   ) -> [WhatsNewDay] {
     var calendar = Calendar(identifier: .gregorian)
     calendar.timeZone = timeZone
@@ -244,14 +281,22 @@ public enum WhatsNew {
     for commit in commits.sorted(by: { $0.date > $1.date }) where commit.date >= since && commit.date <= now {
       guard let parsed = parse(subject: commit.subject, body: commit.body, issueStories: issueStories) else { continue }
       let day = dayFormat.string(from: commit.date)
-      guard seen.insert("\(day)/\(parsed.story)").inserted else { continue }
+      // Each commit's fixed reports, even one folded into its story's line for the day.
+      let fixed = closedIssues(subject: commit.subject, body: commit.body).flatMap { reportsByIssue[$0] ?? [] }
+      guard seen.insert("\(day)/\(parsed.story)").inserted else {
+        if !fixed.isEmpty, let i = byDay[day]?.firstIndex(where: { $0.story == parsed.story }) {
+          byDay[day]![i].fixedReports = unique((byDay[day]![i].fixedReports ?? []) + fixed)
+        }
+        continue
+      }
       let story = stories[parsed.story]
       let text = parsed.leading ? (story?.summary ?? parsed.text) : parsed.text
       guard !text.isEmpty else { continue }
       if byDay[day] == nil { order.append(day) }
       byDay[day, default: []].append(
         WhatsNewItem(
-          story: parsed.story, text: text, issue: parsed.issue ?? story?.issue, sha: commit.sha, link: story?.link))
+          story: parsed.story, text: text, issue: parsed.issue ?? story?.issue, sha: commit.sha, link: story?.link,
+          fixedReports: fixed.isEmpty ? nil : unique(fixed)))
     }
     return order.map { WhatsNewDay(day: $0, items: byDay[$0] ?? []) }
   }
@@ -282,6 +327,11 @@ public enum WhatsNew {
   }
 
   // MARK: Helpers
+
+  private static func unique(_ ids: [String]) -> [String] {
+    var seen = Set<String>()
+    return ids.filter { seen.insert($0).inserted }
+  }
 
   private static func field(_ name: String, in line: String) -> String? {
     let prefix = "- **\(name):**"

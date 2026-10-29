@@ -36,9 +36,73 @@ public struct WhatsNewSeen: @unchecked Sendable {
     logger?("ui", ["action": "dismiss_whats_new", "newest": .string(newest)])
   }
 
+  /// The reports an earlier build's feed already fixed, so the home row headlines a fix only in the build that
+  /// brought it, dismissed or not. Keeps the fixed reports of this build's feed and the build before it, by each
+  /// feed's newest change, under `<key>.fixed`.
+  public func fixedEarlier(_ feed: WhatsNewFeed?) -> Set<String> {
+    guard let feed, let newest = feed.newest else { return [] }
+    let store = key + ".fixed"
+    var state = defaults.dictionary(forKey: store) ?? [:]
+    if state["build"] as? String != newest {
+      let fixed = feed.days.flatMap(\.items).flatMap { $0.fixedReports ?? [] }.map { $0.uppercased() }
+      state = ["build": newest, "fixed": fixed, "earlier": state["fixed"] as? [String] ?? []]
+      defaults.set(state, forKey: store)
+    }
+    return Set(state["earlier"] as? [String] ?? [])
+  }
+
   /// The feed the build bundled as `whats-new.json` (scripts/whats-new.sh); nil when it is missing or unreadable.
   public static func bundledFeed(_ bundle: Bundle = .main, name: String = "whats-new") -> WhatsNewFeed? {
     WhatsNewFeed.decode(bundle.url(forResource: name, withExtension: "json").flatMap { try? Data(contentsOf: $0) })
+  }
+}
+
+/// One of this person's own reports that a change in this build fixed: the change's `fixedReports` (from the issue
+/// its commit closed) matched against the device's `bugs.jsonl`. Nothing leaves the device; it is the report's own
+/// note shown back to whoever wrote it.
+public struct WhatsNewFix: Equatable, Sendable {
+  /// The note's first line with words, cut to 80 characters.
+  public var note: String
+  public var reportedAt: Date
+
+  /// "Fixed in this build: “the timer stopped…” (Oct 10)", under the change in the list.
+  public func line(timeZone: TimeZone = .current) -> String {
+    let format = DateFormatter()
+    format.locale = Locale(identifier: "en_US_POSIX")
+    format.timeZone = timeZone
+    format.dateFormat = "MMM d"
+    return "Fixed in this build: “\(note)” (\(format.string(from: reportedAt)))"
+  }
+
+  /// The home row's words after "What's new · " when this build fixed one of the person's reports. Reports in
+  /// `fixedEarlier` (`WhatsNewSeen.fixedEarlier`) are not announced again on a later build.
+  public static func homeLine(_ feed: WhatsNewFeed?, reports: [BugReport], fixedEarlier: Set<String> = []) -> String {
+    let fresh = reports.filter { !fixedEarlier.contains($0.id.uuidString.uppercased()) }
+    return feed?.fixes(in: fresh).first.map { "Fixed in this build: “\($0.note)”" } ?? WhatsNew.homeLine(feed)
+  }
+}
+
+extension WhatsNewItem {
+  /// This change's fixes among `reports` (the device's own), oldest report first. Reports with no note are skipped.
+  public func fixes(in reports: [BugReport]) -> [WhatsNewFix] {
+    guard let ids = fixedReports, !ids.isEmpty else { return [] }
+    let wanted = Set(ids.map { $0.uppercased() })
+    return reports.filter { wanted.contains($0.id.uuidString.uppercased()) }
+      .sorted { $0.reportedAt < $1.reportedAt }
+      .compactMap { report -> WhatsNewFix? in
+        let line = report.note.split(whereSeparator: \.isNewline)
+          .map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty }
+        guard let line else { return nil }
+        return WhatsNewFix(note: line.count > 80 ? String(line.prefix(79)) + "…" : line, reportedAt: report.reportedAt)
+      }
+  }
+}
+
+extension WhatsNewFeed {
+  /// Every fix of the person's reports in the feed, newest change first.
+  public func fixes(in reports: [BugReport]) -> [WhatsNewFix] {
+    guard !reports.isEmpty else { return [] }
+    return days.flatMap(\.items).flatMap { $0.fixes(in: reports) }
   }
 }
 
@@ -48,15 +112,17 @@ public struct WhatsNewSeen: @unchecked Sendable {
   import SwiftUI
 
   /// The list: the last month's changes by day, newest first, each opening its story (CG #232). Logs `ui`
-  /// open_whats_new on appear and open_story on a tap.
+  /// open_whats_new on appear and open_story on a tap. Pass the device's reports (`BugStore().readAll().reports`)
+  /// and a change that fixed one of them says so under it: "Fixed in this build: “<the note>” (Oct 10)".
   public struct WhatsNewView: View {
     let feed: WhatsNewFeed?
+    let reports: [BugReport]
     let logger: BugLogger
     let from: String
     @Environment(\.openURL) private var openURL
 
-    public init(feed: WhatsNewFeed?, logger: @escaping BugLogger, from: String = "row") {
-      self.feed = feed; self.logger = logger; self.from = from
+    public init(feed: WhatsNewFeed?, reports: [BugReport] = [], logger: @escaping BugLogger, from: String = "row") {
+      self.feed = feed; self.reports = reports; self.logger = logger; self.from = from
     }
 
     public var body: some View {
@@ -71,7 +137,7 @@ public struct WhatsNewSeen: @unchecked Sendable {
                     openURL(link)
                   } label: {
                     HStack {
-                      ChangeLine(item: item)
+                      ChangeLine(item: item, fixes: item.fixes(in: reports))
                       Spacer()
                       Image(systemName: "arrow.up.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
                     }
@@ -79,7 +145,7 @@ public struct WhatsNewSeen: @unchecked Sendable {
                   .tint(.primary)
                   .accessibilityIdentifier("whats-new-story-\(item.story)")
                 } else {
-                  ChangeLine(item: item)
+                  ChangeLine(item: item, fixes: item.fixes(in: reports))
                 }
               }
             }
@@ -97,6 +163,7 @@ public struct WhatsNewSeen: @unchecked Sendable {
           [
             "action": "open_whats_new", "from": .string(from), "days": .int(days.count),
             "changes": .int(days.reduce(0) { $0 + $1.items.count }),
+            "fixed_reports": .int(feed?.fixes(in: reports).count ?? 0),
           ])
       }
     }
@@ -104,11 +171,17 @@ public struct WhatsNewSeen: @unchecked Sendable {
 
   private struct ChangeLine: View {
     let item: WhatsNewItem
+    let fixes: [WhatsNewFix]
 
     var body: some View {
       VStack(alignment: .leading, spacing: 3) {
         Text(item.text)
         Text(item.caption).font(.caption).foregroundStyle(.secondary)
+        ForEach(Array(fixes.enumerated()), id: \.offset) { _, fix in
+          Label(fix.line(), systemImage: "checkmark.circle.fill")
+            .font(.caption).foregroundStyle(.green)
+            .accessibilityIdentifier("whats-new-fixed-report")
+        }
       }
       .padding(.vertical, 2)
     }
@@ -118,6 +191,7 @@ public struct WhatsNewSeen: @unchecked Sendable {
   /// newer build. Shows nothing when there is nothing to show or the newest was dismissed.
   public struct WhatsNewRow: View {
     let feed: WhatsNewFeed?
+    let reports: [BugReport]
     let seen: WhatsNewSeen
     let logger: BugLogger
     let open: () -> Void
@@ -133,8 +207,12 @@ public struct WhatsNewSeen: @unchecked Sendable {
       @State private var dismissed = false
     #endif
 
-    public init(feed: WhatsNewFeed?, seen: WhatsNewSeen = WhatsNewSeen(), logger: @escaping BugLogger, open: @escaping () -> Void) {
-      self.feed = feed; self.seen = seen; self.logger = logger; self.open = open
+    /// `reports`: the device's own (`BugStore().readAll().reports`); when this build fixed one, the row says so.
+    public init(
+      feed: WhatsNewFeed?, reports: [BugReport] = [], seen: WhatsNewSeen = WhatsNewSeen(), logger: @escaping BugLogger,
+      open: @escaping () -> Void
+    ) {
+      self.feed = feed; self.reports = reports; self.seen = seen; self.logger = logger; self.open = open
     }
 
     public var body: some View {
@@ -142,7 +220,7 @@ public struct WhatsNewSeen: @unchecked Sendable {
         HStack(alignment: .firstTextBaseline) {
           Button(action: open) {
             (Text(Image(systemName: "sparkles")) + Text("  What's new").fontWeight(.semibold)
-              + Text(" · \(WhatsNew.homeLine(feed))").foregroundStyle(.secondary))
+              + Text(" · \(WhatsNewFix.homeLine(feed, reports: reports, fixedEarlier: seen.fixedEarlier(feed)))").foregroundStyle(.secondary))
               .font(.subheadline)
               .lineLimit(2)
               .multilineTextAlignment(.leading)
