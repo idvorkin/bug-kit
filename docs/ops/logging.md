@@ -10,7 +10,7 @@ The README's principles say what to log: instrument before theorizing, log silen
 
 Without the table, the next session greps the source to learn what the log can say, and instrumenting first only pays off if the next agent knows the events exist. Sources: EA `docs/DEBUGGING.md` "Event catalogue"; CG `docs/DEBUGGING.md` and its same-change rule.
 
-BugKit's own events are `bug_report_open`, `bug_report`, `bug_report_cancel`, `shake`, `bug_hook`, the `dictation_*` events, `logs_pruned`, `crash_report`, the `ui` actions of What's new, and `error` with `where`. Copy them into the app's table.
+BugKit's own events are `bug_report_open`, `bug_report`, `bug_report_cancel`, `shake`, `bug_hook`, the `dictation_*` events, `logs_pruned`, `crash_report`, the `ui` actions of What's new, and `error` with `where`. Copy them into the app's table. A line that cannot be written (full disk, dead descriptor) is dropped, never raised; the next line that lands is preceded by `error` with `where: "session_log"` and `dropped`, the count lost. That note starts on a fresh line, so a partial line left by the failed write ends on its own line instead of swallowing the note, and a blank line can appear there.
 
 ## One `ui` event per user action, with `from:`
 

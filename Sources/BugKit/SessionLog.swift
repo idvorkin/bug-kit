@@ -28,7 +28,10 @@ public final class SessionLog: @unchecked Sendable {
   public let startedAt: Date
   private let documents: URL
   private let queue = DispatchQueue(label: "bugkit.session-log")
-  private var handle: FileHandle?
+  /// Internal so a host test can break the descriptor underneath it.
+  private(set) var handle: FileHandle?
+  /// Lines that failed to write since the last one that landed (disk full, a dead descriptor). Touched only on `queue`.
+  private var droppedLines = 0
   private var timers: [DispatchSourceTimer] = []
 
   /// Opens a new log and writes `session_start` with `fields` (put the device, system and build there).
@@ -78,9 +81,38 @@ public final class SessionLog: @unchecked Sendable {
     let t = msSinceStart
     let stamps = Self.stamps(clocks, wall: Date(), mono: ProcessInfo.processInfo.systemUptime)
     queue.async { [self] in
-      guard let handle else { return }
-      handle.write(Self.line(type: type, t: t, fields: fields, stamps: stamps))
-      handle.write(Data([0x0A]))
+      var data = Self.line(type: type, t: t, fields: fields, stamps: stamps)
+      data.append(0x0A)
+      append(data, t: t, stamps: stamps)
+    }
+  }
+
+  /// Writes one line on `queue`. Uses the throwing `write(contentsOf:)`: the legacy `write(_:)` raises an
+  /// Objective-C exception on a full disk or a dead descriptor, which Swift cannot catch, so the logger would crash
+  /// the app it is diagnosing. A failed line is dropped and counted; the next line that lands is preceded by one
+  /// `error` (`where: "session_log"`, `dropped: n`).
+  private func append(_ data: Data, t: Int, stamps: [String: JSONValue]) {
+    guard let handle else { return }
+    if droppedLines > 0 {
+      // A failed write can leave a partial line behind, so the note starts on a fresh line; readers skip blanks.
+      var note = Data([0x0A])
+      note.append(
+        Self.line(
+          type: "error", t: t,
+          fields: ["where": "session_log", "dropped": .int(droppedLines), "message": "lines lost to a failed write"],
+          stamps: stamps))
+      note.append(0x0A)
+      guard (try? handle.write(contentsOf: note)) != nil else {
+        droppedLines += 1
+        return
+      }
+      droppedLines = 0
+    }
+    do {
+      try handle.write(contentsOf: data)
+    } catch {
+      if droppedLines == 0 { print("SessionLog: cannot write \(url.path): \(error)") }  // once per run of failures
+      droppedLines += 1
     }
   }
 

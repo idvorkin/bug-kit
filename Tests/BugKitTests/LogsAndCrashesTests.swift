@@ -133,6 +133,69 @@ private final class Events: @unchecked Sendable {
   #expect(second["ratio"] is NSNull)  // a NaN does not lose the line
 }
 
+@Test func aFailedWriteDropsTheLineInsteadOfCrashingAndIsCountedOnTheNext() throws {
+  // The legacy FileHandle.write(_:) raises an uncatchable Objective-C exception on a full disk or a dead descriptor.
+  let docs = try tempDir()
+  defer { try? FileManager.default.removeItem(at: docs) }
+  let log = SessionLog(prefix: "app", documents: docs)
+  log.flush()
+  let fd = try #require(log.handle?.fileDescriptor)
+  // Swap a read-only descriptor in underneath the handle, so every write fails with EBADF.
+  let readOnly = open(log.url.path, O_RDONLY)
+  #expect(readOnly >= 0)
+  #expect(dup2(readOnly, fd) == fd)
+  close(readOnly)
+  log.event("lost_one")
+  log.event("lost_two")
+  log.flush()  // reaching here at all is the test: the old write raised and aborted the process
+  // Put a writable descriptor back: the next line lands, preceded by one line counting what was lost.
+  let writable = open(log.url.path, O_WRONLY | O_APPEND)
+  #expect(writable >= 0)
+  #expect(dup2(writable, fd) == fd)
+  close(writable)
+  log.event("after")
+  log.flush()
+  let lines = try String(contentsOf: log.url, encoding: .utf8).split(separator: "\n").map {
+    try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any]
+  }
+  #expect(lines.map { $0["type"] as? String } == ["session_start", "error", "after"])
+  #expect(lines[1]["where"] as? String == "session_log" && lines[1]["dropped"] as? Int == 2)
+}
+
+@Test func aLongOutageIsCountedExactlyAndTheCountResetsForTheNextOutage() throws {
+  // While the descriptor stays dead, every event after the first also fails on its count note; none may be miscounted.
+  let docs = try tempDir()
+  defer { try? FileManager.default.removeItem(at: docs) }
+  let log = SessionLog(prefix: "app", documents: docs)
+  log.flush()
+  let fd = try #require(log.handle?.fileDescriptor)
+  func swap(_ flags: Int32) {
+    let other = open(log.url.path, flags)
+    #expect(other >= 0)
+    #expect(dup2(other, fd) == fd)
+    close(other)
+  }
+  swap(O_RDONLY)
+  for i in 0..<5 { log.event("lost_\(i)") }
+  log.flush()
+  swap(O_WRONLY | O_APPEND)
+  log.event("back1")
+  log.event("back2")
+  log.flush()
+  swap(O_RDONLY)
+  log.event("lost_again")
+  log.flush()
+  swap(O_WRONLY | O_APPEND)
+  log.event("back3")
+  log.flush()
+  let lines = try String(contentsOf: log.url, encoding: .utf8).split(separator: "\n").map {
+    try JSONSerialization.jsonObject(with: Data($0.utf8)) as! [String: Any]
+  }
+  #expect(lines.map { $0["type"] as? String } == ["session_start", "error", "back1", "back2", "error", "back3"])
+  #expect(lines[1]["dropped"] as? Int == 5)
+  #expect(lines[4]["dropped"] as? Int == 1)
+}
+
 @Test func twoLogsInOneSecondGetTheirOwnFiles() throws {
   let docs = try tempDir()
   defer { try? FileManager.default.removeItem(at: docs) }
