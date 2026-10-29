@@ -7,7 +7,7 @@
 
    ```yaml
    packages:
-     BugKit: { url: https://github.com/idvorkin/bug-kit, exactVersion: 0.3.10 }
+     BugKit: { url: https://github.com/idvorkin/bug-kit, exactVersion: 0.3.11 }
    targets:
      MyApp:
        dependencies: [{ package: BugKit }]
@@ -346,12 +346,12 @@ UDIDs, emails or account identifiers.
 
 ### Each app's agent
 
-1. **Pin BugKit 0.3.10 exactly for new adoption**: `prepare(documents:)` below (uploading only reports saved
+1. **Pin BugKit 0.3.11 exactly for new adoption**: `prepare(documents:)` below (uploading only reports saved
    after opt-in) and `BugKitAboutLink` are new in 0.3.3; 0.3.5 makes shake-to-report work over sheets and alerts.
    - Xcode: **File › Add Package Dependencies** → `https://github.com/idvorkin/bug-kit` → **Dependency Rule:
-     Exact Version** → `0.3.10`. For an existing dependency, use the project's **Package Dependencies** tab.
-   - XcodeGen: `packages: { BugKit: { url: https://github.com/idvorkin/bug-kit, exactVersion: 0.3.10 } }`.
-   - SwiftPM: `.package(url: "https://github.com/idvorkin/bug-kit", exact: "0.3.10")`.
+     Exact Version** → `0.3.11`. For an existing dependency, use the project's **Package Dependencies** tab.
+   - XcodeGen: `packages: { BugKit: { url: https://github.com/idvorkin/bug-kit, exactVersion: 0.3.11 } }`.
+   - SwiftPM: `.package(url: "https://github.com/idvorkin/bug-kit", exact: "0.3.11")`.
 
    Existing senders on 0.3.0–0.3.2 stay compatible: their CloudKit report format works with the updated reader,
    and they do not call `prepare`. lcd-timer and Magic Monitor's Mac side need 0.3.1 or later for the Mac
@@ -663,7 +663,7 @@ app's old watch reporter until it passes.
 
 ## About / version in Settings
 
-Requires BugKit 0.3.3 or later (pin 0.3.10 exactly, as in [CloudKit adoption](#each-apps-agent)). Place `BugKitAboutLink()`
+Requires BugKit 0.3.3 or later (pin 0.3.11 exactly, as in [CloudKit adoption](#each-apps-agent)). Place `BugKitAboutLink()`
 in a Settings `List` or `Form` inside the app's `NavigationStack`. It opens the
 shared `BugKitAboutView`: app name, version (build), short commit linked to GitHub, and repository link.
 The same view supports iOS, macOS and watchOS. For a custom navigation label or a sheet, present

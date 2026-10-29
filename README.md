@@ -34,7 +34,7 @@ Add `https://github.com/idvorkin/bug-kit` through Xcode’s **File › Add Packa
 packages:
   BugKit:
     url: https://github.com/idvorkin/bug-kit
-    exactVersion: 0.3.10  # an exact tag, never main
+    exactVersion: 0.3.11  # an exact tag, never main
 targets:
   MyApp:
     dependencies:
@@ -145,7 +145,7 @@ These commands need no feature flag. Run the listener at least once to populate 
 | Bridge an existing logger | Convert fields with `fields.mapValues(\.foundation)` when the app's logger accepts `[String: Any]`. |
 | Foundation context | Convert an existing `[String: Any]` context with `try context.mapValues { try JSONValue(foundation: $0) }`. Unsupported values throw `JSONValue.FoundationConversionError`; `BugReporterHooks.context` does not throw, so convert and handle the error before supplying it. |
 | Apps with a keyboard extension | Link BugKit to the host target only. The model, store, writer and session log compile extension-safe; the reporter UI is unavailable in extensions. See [extensions](docs/integration.md#app-group-storage). |
-| Private CloudKit delivery | Add the shared container entitlement, retain `CloudKitReportDelivery`, await `prepare(documents:)` before exposing the reporter/writer, pass `delivery:`, and call `start()` at launch/foreground. Only reports saved after opt-in upload. New adopters, `prepare(documents:)` and Mac apps pin `exact: "0.3.10"`; existing 0.3.0–0.3.2 senders without `prepare` remain compatible with the reader. Configure the listener with `cloudkit_config`. Default: off. See [CloudKit adoption](docs/integration.md#private-cloudkit-delivery). |
+| Private CloudKit delivery | Add the shared container entitlement, retain `CloudKitReportDelivery`, await `prepare(documents:)` before exposing the reporter/writer, pass `delivery:`, and call `start()` at launch/foreground. Only reports saved after opt-in upload. New adopters, `prepare(documents:)` and Mac apps pin `exact: "0.3.11"`; existing 0.3.0–0.3.2 senders without `prepare` remain compatible with the reader. Configure the listener with `cloudkit_config`. Default: off. See [CloudKit adoption](docs/integration.md#private-cloudkit-delivery). |
 | Weekly usage summary | The listener appends one `kind: "usage"` line per app to `inbox.jsonl` every `usage_days` (default 7; `0` turns it off), from the `ui_*` breadcrumbs in pulled session logs. Set `"usage": false` on an app to skip it. `listener/bug-listener usage [--days N] [--json]` reads the logs already on the Mac. See [usage summary](docs/ops/listener.md#usage-summary). |
 | Shake and keyboard reporting | Enabled by `.bugReporting(reporter)`. `systemShake`, `gentleShake`, `commandI` and `dialogKeys` default to `true`. |
 | Report button | Add `BugReportButton(reporter: reporter)` to your view or toolbar. |
@@ -163,7 +163,7 @@ These commands need no feature flag. Run the listener at least once to populate 
 | Commit in reports | Set `BugKitCommit` in the app's Info.plist to its build's git commit. |
 | Simulator launch hooks | Set `options.launchHookPrefix = "APP"` and call `reporter.runLaunchHooks()` on appearance. Launch with `SIMCTL_CHILD_APP_BUG="test note" xcrun simctl launch booted <bundle-id>` to save a report. Add `SIMCTL_CHILD_APP_BUG_AFTER=10` for slower cold launches (default 2 seconds), or use `SIMCTL_CHILD_APP_SHAKE_AFTER=2` to open the dialog. |
 | Reset What's new for UI tests | Construct `WhatsNewSeen(launchHookPrefix: "APP", logger: logger)` once in app initialization and pass it to the row. Launch with `SIMCTL_CHILD_APP_WHATS_NEW_RESET=1`. This clears dismissal before the first home render. |
-| About / version | Pin `exact: "0.3.10"`. Add `BugKitAboutLink()` inside Settings navigation; set build Info.plist keys `BugKitCommit` and `BugKitRepositoryURL`. Pass `extraRows` for model name/version; see [adoption](docs/integration.md#about--version-in-settings). |
+| About / version | Pin `exact: "0.3.11"`. Add `BugKitAboutLink()` inside Settings navigation; set build Info.plist keys `BugKitCommit` and `BugKitRepositoryURL`. Pass `extraRows` for model name/version; see [adoption](docs/integration.md#about--version-in-settings). |
 | What's new | Add the `scripts/whats-new.sh` build phase, load `WhatsNewSeen.bundledFeed()`, then display `WhatsNewRow` / `WhatsNewView`; see the [complete setup](docs/integration.md). |
 | Log retention | Call `BugStore().pruneLogs(logger: log.logger)` at launch. Add `keepNewest: 20` for a count cap; logs named by reports remain protected. |
 
