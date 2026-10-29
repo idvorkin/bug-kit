@@ -58,12 +58,13 @@ Listener state and `mac_dir` must not overlap.
 
 First contact baselines existing reports and crashes, just like the device lane. A report whose
 `<folder>/report.json` carries a non-empty `beads` field was filed by the app's own filer (Magic Monitor's
-`just file-bugs` writes the Beads id there); the listener records that id as the delivery receipt, logs
-`outcome: filed_by_app` and never refiles it, even under `--backfill`. GitHub UUID markers and shared
-listener receipts also prevent refiling. To retire an app's own Mac filing script, stop it before handing
-filing to the listener, preview `--once --dry-run --backfill` for unfiled old reports, then use
-`--once --backfill` only for history that still needs filing. Magic Monitor can then remove its Mac-only
-`scripts/file-bugs.sh`. Check a newly saved local report reaches both the tracker and inbox once.
+`just file-bugs` wrote the Beads id there before mmn-6w8 retired it); the listener records that id as the
+delivery receipt, logs `outcome: filed_by_app` and never refiles it, even under `--backfill`. GitHub UUID
+markers and shared listener receipts also prevent refiling. Magic Monitor's handover followed this order: its
+filing script was stopped before the listener took over filing, `--once --dry-run --backfill` previewed the
+unfiled old reports, `--once --backfill` filed only the history that still needed it, and then mmn-6w8 removed
+the Mac-only `scripts/file-bugs.sh` and its recipe. Any other app retiring its own Mac filer should follow the
+same order, then check that a newly saved local report reaches the tracker and the inbox exactly once.
 
 `mac_store` log events and `status.json.mac_stores` expose root reachability; `doctor` checks local roots
 without filing. A readable Mac store counts as reachable even when no device is paired.
