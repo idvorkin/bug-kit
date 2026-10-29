@@ -1323,3 +1323,137 @@ def test_a_full_issue_page_is_not_a_complete_marker_list(listener_state, monkeyp
     monkeypatch.setattr(bl, "run", lambda *args, **kwargs: (0, json.dumps([{"body": "a"}, {"body": "b"}]), ""))
     a = {"name": "app", "tracker": {"kind": "github", "repo": "owner/app"}}
     assert bl.Filer().check(a, {"id": "NEW", "reported_at": "T", "note": "x"}) == ("error", None)
+
+
+# --- usage summary (VISION: "which screens and features each app used") ------------------------------------
+
+
+def session_log(path, started, *events):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [{"type": "session_start", "t": 0, "started": started}] + list(events)
+    path.write_text("\n".join(json.dumps(e) for e in lines) + "\nnot json\n")
+
+
+def iso(delta_days=0):
+    moment = bl.dt.datetime.now(bl.dt.timezone.utc) - bl.dt.timedelta(days=delta_days)
+    return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def test_usage_counts_screens_and_controls_of_recent_sessions_only(tmp_path):
+    session_log(tmp_path / "iphone" / "logs" / "new.jsonl", iso(1),
+                {"type": "ui_touch_begin", "t": 10, "screen": "home", "identifier": "start"},
+                {"type": "ui_tap", "t": 20, "screen": "home", "identifier": "start"},
+                {"type": "ui_control", "t": 30, "screen": "settings", "identifier": "units"},
+                {"type": "ui", "t": 40, "screen": "settings", "action": "export", "from": "tap"},
+                {"type": "ui_scene", "t": 50, "active": False},
+                {"type": "set_saved", "t": 120000})
+    session_log(tmp_path / "iphone" / "logs" / "old.jsonl", iso(30), {"type": "ui_tap", "t": 5, "screen": "old"})
+    since = bl.dt.datetime.now(bl.dt.timezone.utc) - bl.dt.timedelta(days=7)
+    result = bl.usage_summary(sorted(tmp_path.rglob("*.jsonl")), since)
+    assert result["sessions"] == 1 and result["days_active"] == 1 and result["devices"] == {"iphone": 1}
+    assert result["minutes"] == 2.0  # the last t in the session
+    assert result["actions"] == 3  # touch halves and scene changes are not uses
+    assert dict(result["screens"]) == {"home": 1, "settings": 2}
+    assert dict(result["controls"]) == {"start": 1, "units": 1, "export": 1}
+
+
+@pytest.fixture
+def usage_device(listener_state, monkeypatch):
+    dev = {"id": "device-id", "dir": "iphone", "type": "iPhone", "model": "phone"}
+    app = {"name": "app", "bundle": "app.bundle", "tracker": {"kind": "none"}}
+    copies = []
+    monkeypatch.setattr(bl, "list_devices", lambda: [dev])
+    monkeypatch.setattr(bl, "probe", lambda dev: {"locked": False})
+
+    def copy(dev, a, source, dest, locked, **kwargs):
+        copies.append(source)
+        if source == "Documents/logs":
+            session_log(dest / "app-1.jsonl", iso(1), {"type": "ui_tap", "t": 60000, "screen": "home", "identifier": "go"})
+        return True
+
+    monkeypatch.setattr(bl, "copy", copy)
+    return {"apps": [app], "poll_seconds": 300, "usage_days": 7}, copies
+
+
+def usage_lines():
+    if not bl.INBOX.exists():
+        return []
+    return [json.loads(l) for l in bl.INBOX.read_text().splitlines() if json.loads(l).get("kind") == "usage"]
+
+
+def test_the_weekly_usage_line_waits_a_week_then_pulls_the_logs_once(usage_device, listener_state):
+    cfg, copies = usage_device
+    bl.poll(cfg, False)  # the first poll only starts the clock
+    assert usage_lines() == [] and "Documents/logs" not in copies
+    status = bl.read_status()
+    assert bl.parse_time(status["usage_last"]) is not None
+    status["usage_last"] = iso(8)
+    bl.save_status(status)
+    bl.poll(cfg, False)
+    assert copies.count("Documents/logs") == 1
+    (line,) = usage_lines()
+    assert line["app"] == "app" and line["days"] == 7 and line["sessions"] == 1
+    assert line["screens"] == [["home", 1]] and line["controls"] == [["go", 1]]
+    assert (listener_state / "app" / "iphone" / "logs" / "app-1.jsonl").exists()
+    bl.poll(cfg, False)  # not due again for a week
+    assert copies.count("Documents/logs") == 1 and len(usage_lines()) == 1
+
+
+def test_a_failed_usage_pull_marks_the_line_partial_and_waits_a_week(usage_device, listener_state, monkeypatch):
+    cfg, copies = usage_device
+    calls = []
+
+    def timed_out(dev, a, source, dest, locked, **kwargs):
+        calls.append(source)
+        return source != "Documents/logs"  # the log folder copy times out; reports still copy
+
+    monkeypatch.setattr(bl, "copy", timed_out)
+    bl.save_status({"usage_last": iso(8)})
+    bl.poll(cfg, False)
+    (line,) = usage_lines()
+    assert line["unread_devices"] == ["iphone"]
+    assert calls.count("Documents/logs") == 1
+    bl.poll(cfg, False)  # the next poll does not pull every log folder again
+    assert calls.count("Documents/logs") == 1 and len(usage_lines()) == 1
+
+
+def test_an_offline_device_or_mac_store_marks_the_usage_line_partial(usage_device, listener_state, monkeypatch, tmp_path):
+    cfg, copies = usage_device
+    iphone = {"id": "device-id", "dir": "iphone", "type": "iPhone", "model": "phone"}
+    ipad = {"id": "ipad-id", "dir": "ipad", "type": "iPad", "model": "tablet"}
+    monkeypatch.setattr(bl, "list_devices", lambda: [iphone, ipad])
+    monkeypatch.setattr(bl, "probe", lambda dev: {"locked": False} if dev is iphone else None)  # the iPad is asleep
+    cfg["apps"].append({"name": "macapp", "bundle": "mac.bundle", "tracker": {"kind": "none"},
+                        "mac_dir": str(tmp_path / "missing-store")})
+    bl.save_status({"usage_last": iso(8)})
+    bl.poll(cfg, False)
+    lines = {line["app"]: line for line in usage_lines()}
+    assert lines["app"]["unread_devices"] == ["ipad"]
+    assert lines["macapp"]["unread_devices"] == ["ipad", "mac"]
+
+
+def test_usage_days_zero_turns_the_summary_off(usage_device, listener_state):
+    cfg, copies = usage_device
+    cfg["usage_days"] = 0
+    bl.save_status({"usage_last": iso(30)})
+    bl.poll(cfg, False)
+    assert usage_lines() == [] and "Documents/logs" not in copies
+
+
+def test_usage_days_must_be_a_whole_number(listener_state):
+    path = listener_state / "apps.json"
+    path.write_text(json.dumps({"apps": [{"name": "app", "bundle": "b"}], "usage_days": -1}))
+    with pytest.raises(ValueError, match="usage_days"):
+        bl.load_config(path)
+
+
+def test_usage_command_reads_pulled_logs_without_contacting_devices(cli_config, listener_state, monkeypatch):
+    monkeypatch.setattr(bl, "run", lambda *args, **kwargs: pytest.fail("usage must not contact devices"))
+    session_log(listener_state / "app" / "iphone" / "logs" / "a.jsonl", iso(2),
+                {"type": "ui_tap", "t": 1000, "screen": "home", "identifier": "go"})
+    result = invoke(["usage", "--config", str(cli_config), "--json"])
+    assert result.exit_code == 0, result.output
+    data = json.loads(result.output)
+    assert data["app"] == "app" and data["sessions"] == 1 and data["controls"] == [["go", 1]]
+    text = invoke(["usage", "--config", str(cli_config)])
+    assert "app: 1 session(s)" in text.output and "home 1" in text.output

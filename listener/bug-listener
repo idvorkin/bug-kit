@@ -30,6 +30,7 @@ import tempfile
 import time
 import traceback
 import uuid
+from collections import Counter
 from pathlib import Path
 from typing import Any, Optional
 
@@ -134,6 +135,9 @@ def load_config(path: Path) -> dict:
     interval = cfg.setdefault("poll_seconds", 300)
     if isinstance(interval, bool) or not isinstance(interval, int) or interval <= 0:
         raise ValueError("poll_seconds must be a positive integer")
+    usage_days = cfg.setdefault("usage_days", 7)
+    if isinstance(usage_days, bool) or not isinstance(usage_days, int) or usage_days < 0:
+        raise ValueError("usage_days must be a whole number of days (0 turns the usage summary off)")
     if "cloudkit_config" in cfg:
         value = cfg["cloudkit_config"]
         if not isinstance(value, str) or not Path(value).expanduser().is_absolute():
@@ -929,6 +933,110 @@ def poll_crashes(a: dict, dev: dict, local: Path, locked: Any, seen: dict, filer
             deliver(filer, a, rec, dev, local, entry, "crash_keys", seen, summary)
 
 
+# --- usage summary ------------------------------------------------------------------------------------------
+
+# Physical-input halves and scene changes are not a use of a feature: a tap already carries its begin.
+USAGE_SKIP = {"ui_touch_begin", "ui_touch_cancel", "ui_scene"}
+
+
+def usage_summary(logs: list[Path], since: dt.datetime, top: int = 10) -> dict:
+    """Which screens and controls an app's sessions used since `since`, from the `ui_*` breadcrumbs (rich
+    diagnostics) and the apps' own `ui` events already in each session log. One pass per log, never fatal."""
+    sessions, minutes, days, devices = 0, 0.0, Counter(), Counter()
+    screens, controls, actions = Counter(), Counter(), 0
+    for path in sorted(logs):
+        try:
+            with path.open(errors="replace") as f:
+                start = json.loads(f.readline() or "{}")
+                began = parse_time(start.get("started")) if isinstance(start, dict) else None
+                if start.get("type") != "session_start" or began is None or began < since:
+                    continue
+                sessions += 1
+                days[began.date().isoformat()] += 1
+                devices[path.parent.parent.name if path.parent.name == "logs" else path.parent.name] += 1
+                last_t = 0
+                for line in f:
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    if not isinstance(event, dict):
+                        continue
+                    if isinstance(event.get("t"), (int, float)) and not isinstance(event.get("t"), bool):
+                        last_t = max(last_t, event["t"])
+                    kind = event.get("type")
+                    if not isinstance(kind, str) or kind in USAGE_SKIP or not (kind == "ui" or kind.startswith("ui_")):
+                        continue
+                    actions += 1
+                    screens[str(event.get("screen") or "?")] += 1
+                    control = event.get("identifier") or (event.get("action") if kind == "ui" else None)
+                    if control:
+                        controls[str(control)] += 1
+                minutes += last_t / 60000
+        except (OSError, ValueError, AttributeError):
+            continue
+    return {"sessions": sessions, "minutes": round(minutes, 1), "days_active": len(days), "per_day": dict(sorted(days.items())),
+            "devices": dict(sorted(devices.items())), "actions": actions,
+            "screens": screens.most_common(top), "controls": controls.most_common(top)}
+
+
+def app_usage(a: dict, days: int) -> dict:
+    since = dt.datetime.now(dt.timezone.utc) - dt.timedelta(days=days)
+    logs = sorted((STATE / a["name"]).glob("*/logs/**/*.jsonl")) if (STATE / a["name"]).is_dir() else []
+    return {"app": a["name"], "bundle": a["bundle"], "days": days,
+            "since": since.isoformat(timespec="seconds").replace("+00:00", "Z"), **usage_summary(logs, since)}
+
+
+def weekly_usage(cfg: dict, reached: list[tuple[dict, dict, Path, Any]], health: dict) -> None:
+    """Every `usage_days` (default 7), pull each reachable app's whole log folder and append one `usage` line per
+    app to the inbox. The first poll only starts the clock. A device that cannot be read is skipped, not an error:
+    the summary is a convenience, the reports are the job."""
+    days = cfg.get("usage_days", 7)
+    if not days:
+        return
+    last = parse_time(health.get("usage_last"))
+    if last is None:
+        health["usage_last"] = now()
+        return
+    if dt.datetime.now(dt.timezone.utc) - last < dt.timedelta(days=days) or not reached:
+        return
+    # Start the next week's clock first: a pull or inbox write that fails waits a week, not one poll, before it
+    # pulls every device's whole log folder again.
+    health["usage_last"] = now()
+    unread: dict[str, list[str]] = {}
+    for a, dev, local, locked in reached:
+        if a.get("usage") is False:
+            continue
+        got = False
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                logs = Path(tmp) / "logs"
+                got = copy(dev, a, a.get("log_dir", "Documents/logs"), logs, locked, allow_missing=True)
+                if got and got != NOT_INSTALLED and logs.is_dir():
+                    shutil.copytree(logs, local / "logs", dirs_exist_ok=True)
+        except OSError as error:
+            got = False
+            log("usage_error", app=a["name"], device=dev["dir"], message=str(error))
+        if not got:
+            unread.setdefault(a["name"], []).append(dev["dir"])
+        log("usage_pull", app=a["name"], device=dev["dir"], ok=bool(got))
+    offline = [d["device"] for d in health.get("devices", []) if not d["reachable"]]
+    for a in cfg["apps"]:
+        if a.get("usage") is False:
+            continue
+        line = {"t": now(), "kind": "usage", **app_usage(a, days)}
+        missed = unread.get(a["name"], []) + offline + [
+            "mac" for s in health.get("mac_stores", []) if s["app"] == a["name"] and not s["reachable"]]
+        if missed:
+            line["unread_devices"] = missed  # counted from older pulls only: the summary is partial
+        log("usage", app=a["name"], sessions=line["sessions"], actions=line["actions"])
+        if DRY:
+            print(json.dumps(line, ensure_ascii=False), flush=True)
+            continue
+        with INBOX.open("a") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+
 # --- poll health --------------------------------------------------------------------------------------------
 
 
@@ -1087,6 +1195,7 @@ def poll(cfg: dict, backfill: bool) -> dict:
         health["devices"] = []
         health["mac_stores"] = []
         devices = []
+        reached: list[tuple[dict, dict, Path, Any]] = []  # (app, device, local dir, locked) for the usage pull
         for a in cfg["apps"]:
             if not a.get("mac_dir"):
                 continue
@@ -1099,6 +1208,7 @@ def poll(cfg: dict, backfill: bool) -> dict:
             summary["reachable"] += 1
             dev = {"id": "local-mac", "dir": "mac", "type": "Mac", "model": "local Mac"}
             local = STATE / a["name"] / "mac"
+            reached.append((a, dev, local, False))
             for action in (poll_reports, poll_crashes):
                 try:
                     action(a, dev, local, False, seen, filer, summary, backfill)
@@ -1126,6 +1236,7 @@ def poll(cfg: dict, backfill: bool) -> dict:
             summary["reachable"] += 1
             for a in cfg["apps"]:
                 local = STATE / a["name"] / dev["dir"]
+                reached.append((a, dev, local, lock["locked"]))
                 # Independent streams: an absent or unreadable bug index must never suppress a crash.
                 for action in (poll_reports, poll_crashes):
                     try:
@@ -1133,6 +1244,10 @@ def poll(cfg: dict, backfill: bool) -> dict:
                     except (OSError, ValueError, TypeError) as e:
                         summary["errors"] += 1
                         log("app_poll_error", app=a["name"], device=dev["dir"], step=action.__name__, message=str(e))
+        try:
+            weekly_usage(cfg, reached, health)
+        except (OSError, ValueError, TypeError) as error:
+            log("usage_error", message=str(error))
         summary["ms"] = int((time.monotonic() - t0) * 1000)
         health.update(last_poll_completed=now(), in_progress=False, summary=summary)
         if not summary["errors"] and summary["reachable"]:
@@ -1286,6 +1401,29 @@ def status(ctx: typer.Context, config: Optional[Path] = typer.Option(None, "--co
             print(f"{item['app']} / {item['device']} {item['key']}: {item['reason']}")
     if not result["ok"]:
         raise typer.Exit(1)
+
+
+@app.command()
+def usage(ctx: typer.Context, config: Optional[Path] = typer.Option(None, "--config"),
+          days: int = typer.Option(7, "--days", min=1, help="Sessions that started in the last N days."),
+          json_output: bool = typer.Option(False, "--json", help="Emit one JSON object per app.")) -> None:
+    """Which screens and controls each app used, from the session logs already pulled to this Mac. Does not
+    contact devices; the poll pulls whole log folders every `usage_days`."""
+    try:
+        cfg = load_config(config or ctx.obj["config"])
+    except (OSError, ValueError, TypeError) as e:
+        print(f"ERROR: {e}")
+        raise typer.Exit(2)
+    for a in cfg["apps"]:
+        result = app_usage(a, days)
+        if json_output:
+            print(json.dumps(result, ensure_ascii=False))
+            continue
+        print(f"{a['name']}: {result['sessions']} session(s), {result['minutes']} min, "
+              f"{result['days_active']} day(s) active, {result['actions']} action(s) since {result['since']}")
+        for label in ("screens", "controls"):
+            if result[label]:
+                print(f"  {label}: " + ", ".join(f"{name} {n}" for name, n in result[label]))
 
 
 @app.callback(invoke_without_command=True)

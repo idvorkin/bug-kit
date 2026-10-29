@@ -184,6 +184,16 @@ Each filed crash also has a local `<diagnostic-name>.report.json` sidecar contai
 
 Diagnostic contents and logs stay local. Issues contain their paths, diagnostic kind/counts and available build metadata. A failed fresh copy never scans stale local files.
 
+## Usage summary
+
+VISION's shared usage log: which screens and features each app used, as a summary on the Mac. Nothing new runs on the device. With rich diagnostics on, every session log already carries `ui_tap`, `ui_drag`, `ui_long_press` and `ui_control` lines with `screen` and `identifier`, plus the app's own `ui` events (`action`, `from`).
+
+- Every `usage_days` (top-level config, default 7; `0` turns it off), the poll copies each reachable app's whole `log_dir` into `~/tmp/agent/bugs/<app>/<device>/logs/`. It then appends one `kind: "usage"` line per app to `inbox.jsonl` with `sessions`, `minutes`, `days_active`, `per_day`, `devices`, `actions`, and the top ten `screens` and `controls` as `[name, count]` pairs. The first poll only starts the clock (`usage_last` in `status.json`). A device whose log folder could not be read that week (a failed pull, a paired device that was offline, or an unreachable Mac store, listed as `mac`) is listed in the line's `unread_devices`, and its numbers come only from logs pulled earlier; the clock still moves on, so a failed pull is retried the next week, not every poll.
+- `"usage": false` on an app skips it, for an app whose logs are too big to pull weekly.
+- A reachable device whose pull fails is skipped (`usage_pull` with `ok: false`); it is not a poll error.
+- `listener/bug-listener usage [--days N] [--json]` prints the same summary from the logs already on the Mac, without contacting a device.
+- Counting rules: a session is a log whose `session_start` began in the window, and its length is its last `t`. `ui_touch_begin`, `ui_touch_cancel` and `ui_scene` are not counted as actions.
+
 ## Doctor and status for agents
 
 ```sh
