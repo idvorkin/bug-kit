@@ -100,7 +100,7 @@ Keep the `Documents/bugs.jsonl`, `Documents/bugs/`, `Documents/logs/` and `Docum
 6. If the named report folder or session log fails to copy, or filing fails, the report stays unseen and the next poll tries again. A missing crash directory is optional: an app may never have crashed. Repeated index lines are handled once per poll.
    Expected misses on the index and crash folder are not errors: a file the app never made (devicectl's "Failed to retrieve the file node", CoreDeviceError 7000) logs `copy` with `absent: path`, and an app not installed on that device (`ContainerLookupErrorDomain`, confirmed by `devicectl device info apps` not listing the app's bundle) logs `absent: app_not_installed` and sets no first-contact baseline, so reports already in the app when it is installed later are baselined, not filed. If the app list shows the app, or the listing itself fails, the container or App Group lookup really failed: the `copy` logs `error: container_lookup_failed` and counts as an error. Real failures, such as a device that drops the connection (CoreDeviceError 4000), still count.
 
-GitHub deduplication prefers UUID markers. Timestamp markers match legacy reports or issues that have no UUID; two UUID reports at the same timestamp remain distinct. The note-prefix fallback applies only to marker-free issues. The lookup reads at most 10,000 issues per repository; a list that reaches that limit counts as a failed read, since a marker could sit on an issue it did not read, so nothing is filed (or baselined) for that repo until the list fits.
+GitHub deduplication prefers UUID markers. Timestamp markers match legacy reports or issues that have no UUID; two UUID reports at the same timestamp remain distinct. The note-prefix fallback applies only to marker-free issues, and it does not drop the report: the evidence is pulled and the report is commented on the matched issue as "Seen again" (reopening one closed as completed), with `seen_again: true` on its inbox line. A report older than the matched issue is the report that issue was filed from by hand, and counts as already filed. The lookup reads at most 10,000 issues per repository; a list that reaches that limit counts as a failed read, since a marker could sit on an issue it did not read, so nothing is filed (or baselined) for that repo until the list fits.
 
 The first time the listener meets an (app, device) pair, it marks reports already there as seen without
 filing them, because the apps' own `just file-bugs` filed those; for a GitHub tracker, only reports that already
@@ -120,7 +120,7 @@ Every step is a JSON line in `~/tmp/agent/bugs/listener.log`:
 - `report`
 - `crash`, `crash_baseline`, `crash_unreadable`
 - `evidence_pending` (named evidence failed to copy; retries next poll)
-- `file` (outcome: `filed`, `already_filed`, `would_file`, `filed_by_app`, `none` or `error`)
+- `file` (outcome: `filed`, `seen_again`, `already_filed`, `would_file`, `filed_by_app`, `none` or `error`)
 - `tracker_error`
 - `notify`
 - `poll_end`, with counts

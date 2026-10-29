@@ -69,7 +69,10 @@ Part of the [BugKit stories](README.md).
 
 - **Scenario:** A report filed by hand, without the marker
 - **Given:** a marker-free issue body already holds the note's first 60 characters
-- **Then:** the listener logs `possible_duplicate` and does not file it again
+- **Then:**
+  - the listener logs `possible_duplicate` and files no new issue;
+  - it still pulls the report's folder and session log, and comments "Seen again" on the matched issue with the device, build, local paths and the report's markers, reopening the issue if it was closed as completed;
+  - the inbox line carries `seen_again: true` and the comment's URL as `ref`; the next poll comments nothing.
 
 - **Scenario:** The issue lookup fails
 - **Given:** `gh issue list` fails

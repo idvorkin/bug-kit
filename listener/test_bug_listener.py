@@ -474,9 +474,111 @@ def test_existing_legacy_and_uuid_markers_are_respected(listener_state, monkeypa
 
 def test_marker_free_issues_still_match_the_note(listener_state, monkeypatch):
     note = "The timer stopped updating when I opened the settings screen"
-    monkeypatch.setattr(bl, "run", lambda *args, **kwargs: (0, json.dumps([{"body": f"> {note}"}]), ""))
+    monkeypatch.setattr(bl, "run", lambda *args, **kwargs: (0, json.dumps([{"body": f"> {note}", "number": 7}]), ""))
     assert bl.Filer().check({"tracker": {"kind": "github", "repo": "owner/app"}},
-                           {"id": "A", "note": note})[0] == "already_filed"
+                           {"id": "A", "note": note})[0] == "seen_again"
+
+
+SEEN_AGAIN_NOTE = "The timer stopped updating when I opened the settings screen"
+
+
+def seen_again_poll(listener_state, monkeypatch, state, *, backfill=True, comment_rc=0, created=None, reason=None,
+                    repeats=1):
+    """One device report whose note matches a marker-free issue #7 in `state`; returns the gh calls and copies."""
+    dev = {"id": "device-id", "dir": "iphone", "type": "iPhone", "model": "phone"}
+    a = {"name": "app", "bundle": "app.bundle", "tracker": {"kind": "github", "repo": "owner/app"},
+         "crash_dir": "Documents/crashes"}
+    rec = {"id": "B", "reported_at": "2026-11-01T10:00:00Z", "note": SEEN_AGAIN_NOTE, "folder": "bugs/s",
+           "log": "logs/session.jsonl", "build": "1.2 (9)"}
+    monkeypatch.setattr(bl, "list_devices", lambda: [dev])
+    monkeypatch.setattr(bl, "probe", lambda dev: {"locked": False})
+    copies, calls = [], []
+
+    def copy(dev, a, source, dest, locked, **kwargs):
+        copies.append(source)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if source == "Documents/bugs.jsonl":
+            dest.write_text("".join(json.dumps({**rec, "id": f"B{i or ''}"}) + "\n" for i in range(repeats)))
+        return source != "Documents/crashes"
+
+    def run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[:3] == ["gh", "issue", "list"]:
+            issue = {"body": f"Filed by hand.\n\n> {SEEN_AGAIN_NOTE}", "number": 7, "state": state,
+                     "stateReason": reason, "createdAt": created, "url": "https://github.com/owner/app/issues/7"}
+            return 0, json.dumps([issue]), ""
+        if cmd[:3] == ["gh", "issue", "comment"]:
+            return (0, "https://github.com/owner/app/issues/7#issuecomment-1\n", "") if comment_rc == 0 else (1, "", "HTTP 502")
+        return 0, "", ""
+
+    monkeypatch.setattr(bl, "copy", copy)
+    monkeypatch.setattr(bl, "run", run)
+    summary = bl.poll({"apps": [a]}, backfill=backfill)
+    return summary, calls, copies
+
+
+def test_a_repeat_of_a_hand_filed_issue_keeps_its_evidence_and_comments_seen_again(listener_state, monkeypatch):
+    summary, calls, copies = seen_again_poll(listener_state, monkeypatch, "OPEN")
+    assert "Documents/bugs/s" in copies and "Documents/logs/session.jsonl" in copies  # evidence is pulled
+    assert not any(cmd[:3] == ["gh", "issue", "create"] for cmd in calls)
+    comment = next(cmd for cmd in calls if cmd[:3] == ["gh", "issue", "comment"])
+    assert comment[3] == "7" and comment[comment.index("-R") + 1] == "owner/app"
+    body = comment[comment.index("--body") + 1]
+    assert body.startswith("**Seen again.**") and "1.2 (9)" in body and "<!-- bug-id:B -->" in body
+    assert summary["seen_again"] == 1 and summary["filed"] == 0
+    line = json.loads(bl.INBOX.read_text())
+    assert line["seen_again"] is True and line["ref"] == "https://github.com/owner/app/issues/7#issuecomment-1"
+    assert bl.load_seen()["app.bundle|device-id"]["keys"] == ["B"]
+    calls.clear()
+    bl.poll({"apps": [{"name": "app", "bundle": "app.bundle", "tracker": {"kind": "github", "repo": "owner/app"},
+                       "crash_dir": "Documents/crashes"}]}, backfill=False)
+    assert not any(cmd[:3] == ["gh", "issue", "comment"] for cmd in calls)  # once only
+
+
+def test_a_repeat_of_a_closed_hand_filed_issue_reopens_it(listener_state, monkeypatch):
+    summary, calls, _ = seen_again_poll(listener_state, monkeypatch, "CLOSED")
+    reopen = next(cmd for cmd in calls if cmd[:3] == ["gh", "issue", "reopen"])
+    assert reopen[3] == "7" and "so it is reopened" in reopen[reopen.index("--comment") + 1]
+    assert not any(cmd[:3] in (["gh", "issue", "create"], ["gh", "issue", "comment"]) for cmd in calls)
+    assert summary["seen_again"] == 1
+    assert json.loads(bl.INBOX.read_text())["ref"] == "https://github.com/owner/app/issues/7"
+
+
+def test_a_second_repeat_in_the_same_poll_comments_on_the_issue_it_reopened(listener_state, monkeypatch):
+    summary, calls, _ = seen_again_poll(listener_state, monkeypatch, "CLOSED", repeats=2)
+    assert [cmd[:4] for cmd in calls if cmd[:3] in (["gh", "issue", "reopen"], ["gh", "issue", "comment"])] == [
+        ["gh", "issue", "reopen", "7"], ["gh", "issue", "comment", "7"]]
+    assert summary["seen_again"] == 2
+
+
+def test_a_report_pasted_into_an_issue_by_hand_is_already_filed_not_seen_again(listener_state, monkeypatch):
+    # The issue opened after the report was made (10:00): someone filed this very report by hand.
+    summary, calls, _ = seen_again_poll(listener_state, monkeypatch, "CLOSED", created="2026-11-01T10:05:00Z")
+    assert not any(cmd[:3] in (["gh", "issue", "create"], ["gh", "issue", "comment"], ["gh", "issue", "reopen"])
+                   for cmd in calls)
+    assert summary["seen_again"] == 0
+
+
+def test_a_repeat_of_an_issue_closed_as_not_planned_is_commented_not_reopened(listener_state, monkeypatch):
+    summary, calls, _ = seen_again_poll(listener_state, monkeypatch, "CLOSED", created="2026-10-20T09:00:00Z",
+                                        reason="NOT_PLANNED")
+    assert not any(cmd[:3] == ["gh", "issue", "reopen"] for cmd in calls)
+    comment = next(cmd for cmd in calls if cmd[:3] == ["gh", "issue", "comment"])
+    assert "so it is reopened" not in comment[comment.index("--body") + 1]
+    assert summary["seen_again"] == 1
+
+
+def test_a_failed_seen_again_comment_stays_pending(listener_state, monkeypatch):
+    summary, _, _ = seen_again_poll(listener_state, monkeypatch, "OPEN", comment_rc=1)
+    assert summary["errors"] >= 1 and summary["seen_again"] == 0
+    assert bl.load_seen()["app.bundle|device-id"]["keys"] == []
+    assert not bl.INBOX.exists()
+
+
+def test_first_contact_still_baselines_reports_matching_a_hand_filed_issue(listener_state, monkeypatch):
+    summary, calls, _ = seen_again_poll(listener_state, monkeypatch, "OPEN", backfill=False)
+    assert summary["baselined"] == 1 and summary["seen_again"] == 0
+    assert not any(cmd[:3] in (["gh", "issue", "create"], ["gh", "issue", "comment"]) for cmd in calls)
 
 
 @pytest.mark.parametrize("response", ["not JSON", "{}", '[{"body": 7}]'])
@@ -852,7 +954,7 @@ def test_auto_reports_are_filed_with_the_auto_label(tmp_path, monkeypatch, liste
 def test_auto_reports_dedupe_by_id_not_by_their_shared_note(monkeypatch):
     filer = bl.Filer()
     filer.filed_markers["owner/app"] = {"<!-- bug-id:AUTO1 -->"}
-    filer.bodies["owner/app"] = ["Automatic report: call_failed_while_dialing at the start"]
+    filer.bodies["owner/app"] = [{"body": "Automatic report: call_failed_while_dialing at the start", "number": 1}]
     app = {"name": "app", "tracker": {"kind": "github", "repo": "owner/app"}}
     assert filer.check(app, AUTO) == ("already_filed", "owner/app")
     second = {**AUTO, "id": "AUTO2", "reason": "call_failed_while_dialing",

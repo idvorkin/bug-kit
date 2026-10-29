@@ -126,8 +126,12 @@ their public repos. MM ids (`mmn-…`) and story numbers refer to its own repo. 
     - If looking up the existing issues fails, stop filing rather than file everything again (CG 6fed157).
     - **The marker dedupe has holes.** An issue filed by hand, or by an older script, without the marker is
       invisible to it. CG's report of 2026-10-08T04:00:59Z still shows as unfiled although an issue was said to
-      cover it (#233). So the listener also treats a note whose first 60 characters already appear in a marker-free issue as
-      filed, and logs `possible_duplicate`. When filing by hand, paste the marker.
+      cover it (#233). So the listener also matches a note whose first 60 characters already appear in a marker-free issue. That
+      may be the same bug reported again, the evidence that its fix did not work, so the report is not dropped:
+      the listener pulls its evidence, comments "Seen again" on that issue (reopening it if closed as completed,
+      not if closed as not planned or a duplicate) and logs `possible_duplicate`. A report made before the issue
+      was opened is the one someone filed by hand, so it counts as already filed. When filing by hand, paste the
+      marker.
     - **Old index lines can be invalid JSON.** EA's older notes could carry a raw newline, which splits one report
       over two lines. Readers log and skip such lines (`line_unreadable`). BugKit always escapes.
     - Sources: EA AGENTS.md, MM AGENTS.md, CG AGENTS.md ("one PR per issue").

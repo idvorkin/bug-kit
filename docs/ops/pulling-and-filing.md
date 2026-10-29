@@ -62,7 +62,7 @@ Each issue body carries `<!-- bug:<reported_at> -->`. BugKit reports also carry 
 - **The same report pulled from two folders is filed once.** Add each filed marker to the in-memory list straight away (CG `file-bugs.sh`).
 - **The apps' marker dedupe has holes:**
   - An issue filed by hand, or by an older script, without the marker is invisible to it. CG's report of 2026-10-08T04:00:59Z still shows as unfiled although an issue was said to cover it (#233).
-  - So the listener also treats a note whose first 60 characters already appear in an issue as filed, and logs it as `possible_duplicate`.
+  - So the listener also matches a note whose first 60 characters already appear in a marker-free issue, and logs `possible_duplicate`. It may be the same bug reported again, so it is not dropped: the evidence is pulled and the report is commented on that issue as "Seen again", reopening it if it was closed as completed (not if closed as not planned or a duplicate). A report made before the issue was opened is the one someone filed by hand, so it counts as already filed.
   - When you file a report by hand, paste the marker.
 - **Older lines can be invalid JSON.** EA's older notes could hold a raw newline, which splits one report over two lines. Readers log and skip such lines, never die on them, and split only on `\n`: Python's `splitlines()` also breaks on U+2028, which JSON allows inside a string.
 - **beads instead of GitHub:**

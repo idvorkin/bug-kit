@@ -438,6 +438,18 @@ def issue_body(rec: dict, key: str, dev: dict, a: dict, local: Path) -> str:
 # --- trackers -----------------------------------------------------------------------------------------------
 
 
+def filed_from(issue: dict, rec: dict) -> bool:
+    """True when the marker-free issue was opened after the report was made: a person filed this report by hand.
+    A report made after the issue is the same bug seen again. Unknown times count as seen again."""
+    def when(value):
+        try:
+            return dt.datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    made, opened = when(rec.get("reported_at")), when(issue.get("created"))
+    return bool(made and opened and made.tzinfo and opened.tzinfo and opened >= made)
+
+
 class Filer:
     """Files a report through its app's tracker. Returns the issue's url or id, or None on failure (left unseen,
     so the next poll tries again)."""
@@ -451,7 +463,7 @@ class Filer:
         """The bodies' markers, read once per poll. A failed read stops filing (CG 6fed157): better late than twice."""
         if repo not in self.filed_markers:
             rc, out, err = run(["gh", "issue", "list", "-R", repo, "--state", "all", "--limit", str(ISSUE_LIMIT),
-                                "--json", "body"], timeout=90)
+                                "--json", "body,number,state,stateReason,createdAt,url"], timeout=90)
             if rc != 0:
                 log("tracker_error", tracker="github", repo=repo, step="list", rc=rc, stderr=tail(err))
                 self.filed_markers[repo] = None
@@ -462,17 +474,19 @@ class Filer:
                         raise ValueError("issue list is not an array")
                     if len(issues) >= ISSUE_LIMIT:  # gh stops at --limit: the marker may be on an issue not read
                         raise ValueError(f"{len(issues)} issues reach the {ISSUE_LIMIT} read limit")
-                    bodies = [issue.get("body") or "" for issue in issues]
                     self.filed_markers[repo] = set()
                     self.legacy_markers[repo] = set()
                     self.bodies[repo] = []
-                    for body in bodies:
+                    for issue in issues:
+                        body = issue.get("body") or ""
                         markers = set(re.findall(r"<!-- bug(?:-id)?:[^ ]+ -->", body))
                         self.filed_markers[repo].update(markers)
                         if not any(marker.startswith("<!-- bug-id:") for marker in markers):
                             self.legacy_markers[repo].update(markers)
                         if not markers:
-                            self.bodies[repo].append(re.sub(r"\s+", " ", body))
+                            self.bodies[repo].append({"body": re.sub(r"\s+", " ", body), "number": issue.get("number"),
+                                                      "state": issue.get("state"), "reason": issue.get("stateReason"),
+                                                      "created": issue.get("createdAt"), "url": issue.get("url")})
                 except (ValueError, TypeError, AttributeError) as e:
                     log("tracker_error", tracker="github", repo=repo, step="list", message=str(e))
                     self.filed_markers[repo] = None
@@ -494,13 +508,50 @@ class Filer:
             timestamp_markers = set()  # a manual report at this second is a different event
         if (rec.get("id") and f"<!-- bug-id:{rec['id']} -->" in markers) or (at and f"<!-- bug:{at} -->" in timestamp_markers):
             return "already_filed", repo
-        # Some issues were filed without the marker (by hand, or by an older script), so the apps' own dedupe
-        # missed them: a note whose first 60 characters already appear in a marker-free issue is taken as filed.
-        note = "" if is_auto(rec) else re.sub(r"\s+", " ", rec.get("note") or "").strip()
-        if rec.get("kind") != "crash" and len(note) >= 30 and any(note[:60] in body for body in self.bodies.get(repo, [])):
-            log("possible_duplicate", repo=repo, reported_at=at, note=note[:60])
-            return "already_filed", repo
+        match = self.unmarked_match(repo, rec)
+        if match and filed_from(match, rec):
+            return "already_filed", repo  # someone pasted this very report's note into the issue
+        if match:
+            return "seen_again", repo  # not this report's issue: pull its evidence, then `file` comments there
         return None
+
+    def unmarked_match(self, repo: str, rec: dict) -> Optional[dict]:
+        """A marker-free issue (filed by hand, or by an older script) whose body holds this note's first 60
+        characters. It is not proof this report was filed: it may be the same bug reported again, which is the
+        evidence that its fix did not work, so the report is "seen again" on that issue rather than dropped."""
+        note = "" if is_auto(rec) else re.sub(r"\s+", " ", rec.get("note") or "").strip()
+        if rec.get("kind") == "crash" or len(note) < 30:
+            return None
+        return next((issue for issue in self.bodies.get(repo, []) if note[:60] in issue["body"]), None)
+
+    def seen_again(self, a: dict, rec: dict, key: str, dev: dict, local: Path, issue: dict) -> tuple[str, Optional[str]]:
+        """Comments the new report (device, build, local evidence, markers) on the matched issue; reopens it with
+        that comment if it was closed. Idempotent through the delivery receipt, like `file`."""
+        repo = a["tracker"]["repo"]
+        number, closed = issue.get("number"), str(issue.get("state") or "").upper() == "CLOSED"
+        # Closed as not planned or a duplicate: the repeat is noted there, but the decision stands.
+        closed = closed and str(issue.get("reason") or "").upper() not in ("NOT_PLANNED", "DUPLICATE")
+        log("possible_duplicate", repo=repo, reported_at=rec.get("reported_at"), issue=number, closed=closed)
+        if number is None:
+            log("tracker_error", tracker="github", repo=repo, step="seen_again", message="matched issue has no number")
+            return "error", None
+        if DRY:
+            return "would_file", f"github {repo}: seen again on #{number}{' (reopen)' if closed else ''}"
+        body = ("**Seen again.** A new report's note matches this issue" + (", so it is reopened" if closed else "")
+                + ".\n\n" + issue_body(rec, key, dev, a, local))
+        verb, flag = ("reopen", "--comment") if closed else ("comment", "--body")
+        rc, out, err = run(["gh", "issue", verb, str(number), "-R", repo, flag, body], timeout=90)
+        if rc != 0:
+            log("tracker_error", tracker="github", repo=repo, step=verb, issue=number, rc=rc, stderr=tail(err))
+            return "error", None
+        if closed:
+            issue["state"] = "OPEN"
+        lines = [line for line in out.strip().splitlines() if line.startswith("http")]
+        ref = lines[-1] if lines else issue.get("url") or f"{repo}#{number}"
+        markers = self.filed_markers.get(repo)
+        if markers is not None and rec.get("id"):
+            markers.add(f"<!-- bug-id:{rec['id']} -->")  # the same report from a second lane is not commented twice
+        return "seen_again", ref
 
     def file(self, a: dict, rec: dict, key: str, dev: dict, local: Path) -> tuple[str, Optional[str]]:
         kind = a["tracker"].get("kind", "none")
@@ -510,6 +561,9 @@ class Filer:
         if kind == "github":
             repo = a["tracker"]["repo"]
             at = rec.get("reported_at")
+            match = self.unmarked_match(repo, rec)
+            if match and not filed_from(match, rec):
+                return self.seen_again(a, rec, key, dev, local, match)
             if DRY:
                 return "would_file", f"github {repo}: {title}"
             body = issue_body(rec, key, dev, a, local)
@@ -658,6 +712,8 @@ def deliver(filer: Filer, a: dict, rec: dict, dev: dict, local: Path, entry: dic
         return False
     if outcome == "filed":
         summary["filed"] += 1
+    if outcome == "seen_again":
+        summary["seen_again"] += 1
     if not DRY:
         if rec.get("id"):
             seen.setdefault("_deliveries", {})[a["bundle"] + ":" + key] = {"ref": ref, "inbox": False}
@@ -667,13 +723,15 @@ def deliver(filer: Filer, a: dict, rec: dict, dev: dict, local: Path, entry: dic
             f.write(json.dumps({"t": now(), "app": a["name"], "bundle": a["bundle"], "repo": a.get("repo"), "device": dev["dir"],
                                 "key": key, "kind": rec.get("kind", "report"), "reported_at": rec.get("reported_at"),
                                 "note": rec.get("note"), "tracker": a["tracker"]["kind"], "ref": ref,
-                                "dir": str(local)}, ensure_ascii=False) + "\n")
+                                "dir": str(local), **({"seen_again": True} if outcome == "seen_again" else {})},
+                               ensure_ascii=False) + "\n")
             f.flush()
             os.fsync(f.fileno())
         if rec.get("id"):
             seen.setdefault("_deliveries", {})[a["bundle"] + ":" + key] = {"ref": ref, "inbox": True}
         log("inbox", key=key, app=a["name"], device=dev["dir"], ref=ref)
-        notify(f"Bug: {a['name']}", f"{title_of(rec)} ({dev['type']}) {ref or ''}".strip())
+        notify(f"{'Seen again' if outcome == 'seen_again' else 'Bug'}: {a['name']}",
+               f"{title_of(rec)} ({dev['type']}) {ref or ''}".strip())
     entry[keys_field].append(key)
     entry.setdefault("pending", {}).pop(key, None)
     save_seen(seen)
@@ -689,8 +747,8 @@ def already_filed(filer: Filer, a: dict, rec: dict, dev: dict, entry: dict, keys
         return False  # tracker filed; retry the durable agent handoff without creating another issue
     prior = prior or inbox_prior
     stop = ("already_filed", prior.get("ref")) if prior is not None else filer.check(a, rec)
-    if stop is None:
-        return False
+    if stop is None or stop[0] == "seen_again":
+        return False  # new, or a repeat of a hand-filed issue: either way pull the evidence and deliver
     if stop[0] == "error":
         summary["errors"] += 1
         pending(entry, {**rec, "id": key}, "tracker_lookup", a, dev)
@@ -1021,7 +1079,7 @@ def poll(cfg: dict, backfill: bool) -> dict:
                   poll_seconds=cfg.get("poll_seconds", 300))
     save_status(health)
     log("poll_start", apps=[a["name"] for a in cfg["apps"]])
-    summary = {"devices": 0, "reachable": 0, "new": 0, "crashes": 0, "filed": 0, "would_file": 0,
+    summary = {"devices": 0, "reachable": 0, "new": 0, "crashes": 0, "filed": 0, "seen_again": 0, "would_file": 0,
                "skipped": 0, "baselined": 0, "errors": 0}
     try:
         seen = load_seen()
