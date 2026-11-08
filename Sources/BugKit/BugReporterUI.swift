@@ -157,6 +157,7 @@
         hooks.logger(
           "error",
           ["where": "bug_report_open", "message": .string("dialog not shown over \(type(of: top))")])
+        host.dismiss(animated: false)  // a no-op if it was dropped; closes it if UIKit showed it after all
         presented = nil
         screenshot = nil
         flow.cancel()
