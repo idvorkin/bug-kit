@@ -9,6 +9,7 @@ final class WhatsNewTests: XCTestCase {
 
   private func at(_ iso: String) -> Date { ISO8601DateFormatter().date(from: iso)! }
 
+  #if canImport(SwiftUI)
   /// MM's Mac app shows What's new with the same views: they build and construct on the host (macOS).
   func testTheViewsBuildOnTheHost() {
     let feed = WhatsNewFeed(generated: "2026-10-10", days: [])
@@ -17,6 +18,7 @@ final class WhatsNewTests: XCTestCase {
     _ = WhatsNewView(feed: feed, reports: [], logger: { _, _ in })
     _ = WhatsNewRow(feed: feed, reports: [], logger: { _, _ in }, open: {})
   }
+  #endif
 
   // MARK: Fixed in this build (review V1): the person's own report, shown back under the change that fixed it.
 

@@ -100,10 +100,10 @@ public struct DictationJoin: Equatable, Sendable {
   }
 }
 
-#if canImport(UIKit) && os(iOS)
-  import AVFoundation
+// The dictation's state machine builds on macOS too, so the host tests drive it with a fake capture, provider and
+// permissions; only the system microphone, Apple Speech and their permission prompts (below) are iOS only.
+#if os(iOS) || os(macOS)
   import Combine
-  import Speech
 
   /// The microphone's live input level: 0 (silence) to 1 (full scale), smoothed and updated about 20 times a second
   /// while listening, and 0 whenever not listening.
@@ -153,15 +153,6 @@ public struct DictationJoin: Equatable, Sendable {
     private var owner = UUID()
     private var typed = ""
     private var onText: (@MainActor @Sendable (String) -> Void)?
-
-    public convenience init(logger: @escaping BugLogger,
-      providerFactory: (@MainActor @Sendable () -> any BugDictationProvider)? = nil,
-      defaults: UserDefaults = .standard,
-      hostMicrophoneBusy: @escaping @MainActor () -> Bool = { false }) {
-      self.init(logger: logger, providerFactory: providerFactory ?? { AppleDictationProvider(logger: logger) },
-                capture: AVDictationCapture(logger: logger), permissions: .system, defaults: defaults,
-                hostMicrophoneBusy: hostMicrophoneBusy)
-    }
 
     init(logger: @escaping BugLogger, providerFactory: @escaping @MainActor @Sendable () -> any BugDictationProvider,
          capture: any DictationCapture, permissions: DictationPermissions, defaults: UserDefaults,
@@ -353,13 +344,6 @@ public struct DictationJoin: Equatable, Sendable {
   struct DictationPermissions {
     var speech: @MainActor () async -> Bool
     var microphone: @MainActor () async -> Bool
-    static let system = Self(
-      speech: { await withCheckedContinuation { continuation in
-        SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0 == .authorized) }
-      } },
-      microphone: { await withCheckedContinuation { continuation in
-        AVAudioApplication.requestRecordPermission { continuation.resume(returning: $0) }
-      } })
   }
 
   private enum DictationPermissionError: Error, LocalizedError {
@@ -371,5 +355,31 @@ public struct DictationJoin: Equatable, Sendable {
       case .microphoneBusy: "The microphone is in use by this app"
       }
     }
+  }
+#endif
+
+#if canImport(UIKit) && os(iOS)
+  import AVFoundation
+  import Speech
+
+  extension NoteDictation {
+    public convenience init(logger: @escaping BugLogger,
+      providerFactory: (@MainActor @Sendable () -> any BugDictationProvider)? = nil,
+      defaults: UserDefaults = .standard,
+      hostMicrophoneBusy: @escaping @MainActor () -> Bool = { false }) {
+      self.init(logger: logger, providerFactory: providerFactory ?? { AppleDictationProvider(logger: logger) },
+                capture: AVDictationCapture(logger: logger), permissions: .system, defaults: defaults,
+                hostMicrophoneBusy: hostMicrophoneBusy)
+    }
+  }
+
+  extension DictationPermissions {
+    static let system = Self(
+      speech: { await withCheckedContinuation { continuation in
+        SFSpeechRecognizer.requestAuthorization { continuation.resume(returning: $0 == .authorized) }
+      } },
+      microphone: { await withCheckedContinuation { continuation in
+        AVAudioApplication.requestRecordPermission { continuation.resume(returning: $0) }
+      } })
   }
 #endif

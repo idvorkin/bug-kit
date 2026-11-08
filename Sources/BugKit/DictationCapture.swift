@@ -1,7 +1,6 @@
-#if canImport(UIKit) && os(iOS)
-import AVFoundation
 import Foundation
 
+/// The microphone as `NoteDictation` sees it: the system's (`AVDictationCapture`, iOS) or a test's.
 @MainActor
 protocol DictationCapture: AnyObject {
   var onFailure: (@MainActor (String) -> Void)? { get set }
@@ -11,6 +10,9 @@ protocol DictationCapture: AnyObject {
   func stop()
   func restore()
 }
+
+#if canImport(UIKit) && os(iOS)
+import AVFoundation
 
 @MainActor
 final class AVDictationCapture: DictationCapture {
@@ -67,9 +69,10 @@ final class AVDictationCapture: DictationCapture {
   nonisolated static func keepsDiscoveryActivation(
     category: AVAudioSession.Category, options: AVAudioSession.CategoryOptions
   ) -> Bool {
-    let changesOtherAudio = options.contains(.duckOthers)
-      || options.contains(.interruptSpokenAudioAndMixWithOthers)
-    return !changesOtherAudio && (category == .ambient || options.contains(.mixWithOthers))
+    DictationRules.keepsDiscoveryActivation(
+      ambient: category == .ambient, mixesWithOthers: options.contains(.mixWithOthers),
+      ducksOthers: options.contains(.duckOthers),
+      interruptsSpokenAudio: options.contains(.interruptSpokenAudioAndMixWithOthers))
   }
 
   init(logger: @escaping BugLogger) {

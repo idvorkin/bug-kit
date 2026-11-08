@@ -299,7 +299,9 @@ uv run --python 3.12 --with typer --with pytest pytest --import-mode=importlib l
 for script in scripts/*.sh; do bash -n "$script"; done
 ```
 
-Swift tests cover storage, concurrent writes, report flow, dictation merging, logs, crashes and What's new. Python tests cover listener parsing, deduplication, independent crash discovery, evidence retries, doctor/status JSON and deployment commands with fake tools.
+On Linux, `just test-linux` (`scripts/test-linux.sh` says what it needs) runs the host tests that need no Apple framework, then cross-builds the package and its tests for macOS, iOS and the simulator with a Darwin Swift SDK. It does not replace `swift test` on the Mac.
+
+Swift tests cover storage, concurrent writes, report flow, dictation merging and the dictation controller, logs, crashes and What's new. Python tests cover listener parsing, deduplication, independent crash discovery, evidence retries, doctor/status JSON and deployment commands with fake tools.
 
 With XcodeGen and a selected iOS simulator, run `scripts/test-ios-diagnostics.sh <simulator-udid>` to check accessibility redaction, traversal limits and control capture.
 

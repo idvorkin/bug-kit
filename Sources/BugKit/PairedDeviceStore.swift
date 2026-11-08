@@ -3,7 +3,9 @@
 // one unpairs them all.
 
 import Foundation
-import Security
+#if canImport(Security)
+  import Security
+#endif
 
 public protocol PairedDeviceStore: AnyObject {
   func load() -> PairedDevice?
@@ -11,6 +13,7 @@ public protocol PairedDeviceStore: AnyObject {
   func remove()
 }
 
+#if canImport(Security)
 /// The Keychain refused the paired device: the call and its status.
 public struct PairedDeviceStoreFailed: Error, CustomStringConvertible {
   public let call: String
@@ -64,6 +67,7 @@ public final class KeychainPairedDeviceStore: PairedDeviceStore {
 
   public func remove() { SecItemDelete(query as CFDictionary) }
 }
+#endif
 
 /// Keeps the device in memory: for tests, and for previews.
 public final class MemoryPairedDeviceStore: PairedDeviceStore {

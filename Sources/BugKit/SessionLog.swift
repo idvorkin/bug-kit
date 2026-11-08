@@ -142,6 +142,9 @@ public final class SessionLog: @unchecked Sendable {
 
   /// The process's resident memory in MB (Mach `task_info`), nil if the kernel refuses.
   public static func residentMegabytes() -> Int? {
+    #if !canImport(Darwin)
+      return nil
+    #else
     var info = mach_task_basic_info()
     var count = mach_msg_type_number_t(MemoryLayout<mach_task_basic_info>.size / MemoryLayout<natural_t>.size)
     let result = withUnsafeMutablePointer(to: &info) {
@@ -151,6 +154,7 @@ public final class SessionLog: @unchecked Sendable {
     }
     guard result == KERN_SUCCESS else { return nil }
     return Int(info.resident_size / 1_048_576)
+    #endif
   }
 
   /// The wall-clock time of a host-clock (`mono`) time: a camera frame's or a recorded segment's time as the moment

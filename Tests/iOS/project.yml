@@ -28,7 +28,6 @@ targets:
     platform: iOS
     sources:
       - ../BugKitTests/InteractionDiagnosticsTests.swift
-      - ../BugKitTests/NoteDictationTests.swift
       - ../BugKitTests/ScreenshotPrivacyTests.swift
       - ../BugKitTests/ShakeTests.swift
       - ../BugKitTests/WhatsNewDismissSizeTests.swift

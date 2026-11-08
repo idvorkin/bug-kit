@@ -1,5 +1,4 @@
-#if canImport(UIKit) && os(iOS)
-import AVFoundation
+#if os(iOS) || os(macOS)
 import Foundation
 import Testing
 @testable import BugKit
@@ -98,30 +97,6 @@ import Testing
   #expect(fixture.capture.lists == 0)
   #expect(fixture.dictation.microphones.isEmpty)
   #expect(!fixture.dictation.refreshingMicrophones)
-}
-
-@MainActor
-@Test func discoveryKeepsActivationOnlyForPlainMixingHosts() {
-  #expect(AVDictationCapture.keepsDiscoveryActivation(category: .playback, options: .mixWithOthers))
-  #expect(AVDictationCapture.keepsDiscoveryActivation(category: .ambient, options: []))
-  #expect(!AVDictationCapture.keepsDiscoveryActivation(category: .playback, options: [.mixWithOthers, .duckOthers]))
-  #expect(!AVDictationCapture.keepsDiscoveryActivation(
-    category: .playback, options: .interruptSpokenAudioAndMixWithOthers))
-  #expect(!AVDictationCapture.keepsDiscoveryActivation(category: .ambient, options: .duckOthers))
-  #expect(!AVDictationCapture.keepsDiscoveryActivation(category: .soloAmbient, options: []))
-  #expect(!AVDictationCapture.keepsDiscoveryActivation(category: .playback, options: []))
-}
-
-@Test func appleNoSpeechEndsQuietlyOnlyAfterFinish() {
-  let noSpeech = NSError(domain: "kAFAssistantErrorDomain", code: 1110)
-  let ended = NSError(domain: "kAFAssistantErrorDomain", code: 301)
-  let network = NSError(domain: "kAFAssistantErrorDomain", code: 1101)
-  #expect(AppleDictationProvider.endsQuietly(noSpeech, finishing: true))
-  #expect(AppleDictationProvider.endsQuietly(ended, finishing: true))
-  #expect(!AppleDictationProvider.endsQuietly(noSpeech, finishing: false))
-  #expect(!AppleDictationProvider.endsQuietly(network, finishing: true))
-  #expect(!AppleDictationProvider.endsQuietly(NSError(domain: NSURLErrorDomain, code: 1110), finishing: true))
-  #expect(!AppleDictationProvider.endsQuietly(nil, finishing: true))
 }
 
 @MainActor

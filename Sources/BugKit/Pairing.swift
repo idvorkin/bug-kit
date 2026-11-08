@@ -5,6 +5,9 @@
 // the box is in the pairing design, §7. Neither the code nor the key is ever logged or printed.
 
 import Foundation
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
 
 /// `<scheme>://pair?code=<code>&host=<https host, url-encoded>`, as the box's page opens it.
 public struct PairingLink: Equatable, Sendable, CustomStringConvertible,

@@ -291,7 +291,7 @@ Given `<PREFIX>_BUG` notes and `<PREFIX>_BUG_AFTER=10`, reports capture evidence
 
 With dictation enabled, the report offers Automatic and an explicit “Refresh microphones” action to load iOS inputs. Opening a report does not reconfigure audio. The saved input preference applies to a fresh dictation and shows as “Saved microphone” until refreshed. Missing inputs are cleared on refresh; changes during capture stop dictation without erasing text. Apple Speech is the default, while a host factory can choose Deepgram or another streaming provider. Cloud providers skip Apple Speech authorization. Typed words and finalized speech survive interim revisions; save waits for final words, and canceled permission/network callbacks cannot alter another report.
 
-Host coverage (Foundation, `swift test`): `DictationProviderTests.swift` verifies transport, Deepgram handshake credentials, segment revisions, final flushing and cancellation. iOS simulator coverage (`Tests/iOS` bundle): `NoteDictationTests.swift` uses fake iOS capture/permissions to verify selected input, a saved microphone shown before any explicit refresh, no microphone discovery or capture while the host records (including when it starts recording during permission or provider startup), Apple's quiet end after Stop, final text before save, no saved report when dictation on an empty note fails or hears nothing, permission cancellation, service failure, disappeared-input fallback, and that discovery stays active only for plain ambient/`.mixWithOthers` hosts. Physical mic routes and live vendor transcription need separate device/service verification.
+Host coverage (Foundation, `swift test`): `DictationProviderTests.swift` verifies transport, Deepgram handshake credentials, segment revisions, final flushing and cancellation. `DictationRulesTests.swift` verifies Apple's quiet end after Stop and that discovery stays active only for plain ambient/`.mixWithOthers` hosts (it runs on Linux too). Host coverage on the Mac (`swift test`, macOS only, since `NoteDictation` needs Combine): `NoteDictationTests.swift` uses a fake capture, provider and permissions to verify selected input, a saved microphone shown before any explicit refresh, no microphone discovery or capture while the host records (including when it starts recording during permission or provider startup), final text before save, no saved report when dictation on an empty note fails or hears nothing, permission cancellation, service failure and disappeared-input fallback. Physical mic routes and live vendor transcription need separate device/service verification.
 
 ### See the input level, and choose the microphone, on every voice input
 
@@ -301,7 +301,7 @@ then see the audio input levels? This should probably be on every voice input."
 **Status:** PR #99 (1d88f6b, 7e737a6, fb02ef1). The level arithmetic (silence, full scale, the dB mapping,
 smoothing, about 20 updates a second, a peak between updates) is verified on the host by `DictationLevelTests`. The
 level rising with sound and returning to empty on finish, on cancel, and for audio drained after finish begins is
-verified in the iOS simulator by `NoteDictationTests`. The controls and the integration example are verified by
+verified on the Mac host by `NoteDictationTests`. The controls and the integration example are verified by
 typecheck. A real voice moving the meter, and the controls on screen, are device checks still to do.
 
 - **As someone** speaking a note or a message into any of the apps

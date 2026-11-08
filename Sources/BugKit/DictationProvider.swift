@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
 
 /// A fresh instance per dictation. Audio is mono, signed little-endian PCM16 at 16 kHz.
 /// Each stream value replaces the entire spoken portion of the note; typed text is kept by NoteDictation.

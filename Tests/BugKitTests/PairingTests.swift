@@ -2,6 +2,9 @@
 // app shows. Nothing here reaches the network or the Keychain.
 
 import Foundation
+#if canImport(FoundationNetworking)
+  import FoundationNetworking
+#endif
 import Testing
 
 @testable import BugKit

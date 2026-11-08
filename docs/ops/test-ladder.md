@@ -25,7 +25,7 @@ Verify every change on the cheapest rung that can see it, and **name the rung** 
 | EA | `just test` | `just analyze` | `just test-sim`, plus `just watch-screens` | `just run-device`, then `just pull-logs` |
 | CG native | `just native-test` | none | `just native-test-sim` | `just native-run-device`, then `just pull-logs` |
 | MM | `just test` | `just selftest` | `just ipad-selftest` | `just ipad` |
-| BugKit | `swift test`, plus the listener's pytest | none | none of its own; an app's simulator checks use the launch hooks | an app that has migrated |
+| BugKit | `swift test`, plus the listener's pytest; on Linux, `just test-linux` | none | none of its own; an app's simulator checks use the launch hooks | an app that has migrated |
 
 ## What kind of change goes on which rung
 

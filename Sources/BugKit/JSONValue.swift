@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(CoreFoundation)
+  import CoreFoundation  // CFBoolean: Linux Foundation does not re-export it
+#endif
 
 /// A JSON value, for the report's `context`: whatever the app wants to attach (EA: exercise and playhead; MM: mode
 /// and replay time). Numbers stay numbers, never strings, so `jq` can compare them.

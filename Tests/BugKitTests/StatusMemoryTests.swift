@@ -5,6 +5,8 @@ import Testing
 
 // MM special sauce: resident memory on the status line, so a leak shows in the log.
 
+// Mach task_info: residentMegabytes() is nil off Darwin.
+#if canImport(Darwin)
 @Test func residentMemoryIsReadable() throws {
   let mb = try #require(SessionLog.residentMegabytes())
   #expect(mb > 0 && mb < 100_000)
@@ -32,3 +34,4 @@ import Testing
   #expect(!with.isEmpty && with.allSatisfy { ($0["rss_mb"] as? Int ?? 0) > 0 })
   #expect(!without.isEmpty && without.allSatisfy { $0["rss_mb"] == nil })
 }
+#endif

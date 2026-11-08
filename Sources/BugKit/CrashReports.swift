@@ -1,4 +1,6 @@
-import Darwin
+#if canImport(Darwin)
+  import Darwin
+#endif
 import Foundation
 
 #if canImport(MetricKit) && os(iOS)
@@ -33,7 +35,9 @@ public final class CrashReports: NSObject, @unchecked Sendable {
     } catch {
       logger("error", ["where": "crash_folder", "message": .string("\(error)")])
     }
-    installSignalHandlers(folder: self.folder)
+    #if canImport(Darwin)  // the handlers are Darwin calls; the announcing below is plain files
+      installSignalHandlers(folder: self.folder)
+    #endif
     #if canImport(MetricKit) && os(iOS)
       MXMetricManager.shared.add(self)
     #endif
@@ -114,6 +118,7 @@ public final class CrashReports: NSObject, @unchecked Sendable {
   }
 #endif
 
+#if canImport(Darwin)
 // MARK: - The last-resort handlers. Only async-signal-safe calls inside the signal handler: no allocation, no locks.
 
 /// The folder's path, copied once at install into a fixed buffer the handler can read.
@@ -189,3 +194,4 @@ private func appendDecimal(_ value: Int, to buffer: UnsafeMutableBufferPointer<C
   repeat { buffer[i] = CChar(48 + (value / divisor) % 10); i += 1; divisor /= 10 } while divisor > 0
   return i
 }
+#endif
