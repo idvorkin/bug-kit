@@ -148,6 +148,12 @@
       }
       let host = UIHostingController(rootView: BugReportSheet(reporter: self))
       host.modalPresentationStyle = .formSheet
+      #if targetEnvironment(macCatalyst)
+        // A form sheet is a small fixed-size panel on the Mac (#108): open it at most of the window's size instead.
+        if let size = window?.bounds.size {
+          host.preferredContentSize = CGSize(width: size.width * 0.9, height: size.height * 0.9)
+        }
+      #endif
       host.presentationController?.delegate = dismissWatcher
       presented = host
       top.present(host, animated: true)
