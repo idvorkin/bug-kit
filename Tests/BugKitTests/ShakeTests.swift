@@ -158,6 +158,40 @@ private final class OtherWindowRoot: UIViewController {}
     try await Task.sleep(for: .milliseconds(500))  // the report sheet's dismissal animation
   }
 
+  // BugKit #107: on the Mac, "Log it and another" ran its reopen while the closed dialog was still presented. The
+  // fresh dialog was pictured over the old one and presented onto it, UIKit dropped it, and BugKit thought it open.
+  @Test func anotherWaitsForTheClosedDialogToLeave() async throws {
+    let app = try await appWithSheet()
+    defer { app.restore() }
+    app.sheet.motionEnded(.motionShake, with: nil)
+    try await waitForOpen(app.events)
+    let closed = try #require(app.sheet.presentedViewController)
+    app.reporter.flow.note = "first"
+    #expect(app.reporter.flow.log(another: true, style: .recapture) == "first")
+    app.reporter.reopen(after: closed, in: app.window)  // the Mac's early completion: the dialog is still up
+    try await Task.sleep(for: .milliseconds(300))
+    #expect(app.events.opens().count == 1)
+    await withCheckedContinuation { done in closed.dismiss(animated: false) { done.resume() } }
+    for _ in 0..<50 where app.events.opens().count < 2 { try await Task.sleep(for: .milliseconds(20)) }
+    #expect(app.events.opens().count == 2)
+    #expect(app.events.opens().last?["source"] == "another")
+    #expect(app.events.opens().last?["over"] == "Sheet")
+    #expect(app.reporter.flow.isPresented)
+    app.reporter.cancel()
+    try await Task.sleep(for: .milliseconds(500))  // the report sheet's dismissal animation
+  }
+
+  @Test func aDialogUIKitRefusesToShowLeavesNoReportOpen() async throws {
+    let app = try await appWithSheet()
+    defer { app.restore() }
+    let offscreen = UIWindow(windowScene: try #require(app.window.windowScene))
+    offscreen.rootViewController = UIViewController()  // never shown, so UIKit refuses to present from it
+    app.reporter.open(from: .button, in: offscreen)
+    #expect(app.events.opens().isEmpty)
+    #expect(app.events.names().contains("error"))
+    #expect(!app.reporter.flow.isPresented)
+  }
+
   @Test func systemShakeOffIgnoresTheShake() async throws {
     let app = try await appWithSheet(systemShake: false)
     defer { app.restore() }
