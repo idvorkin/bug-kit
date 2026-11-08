@@ -56,6 +56,8 @@ their public repos. MM ids (`mmn-…`) and story numbers refer to its own repo. 
    - BugKit's own dialog follows this rule:
      - it logs `bug_report_open` (source, screen, whether a screenshot was taken, which controller it opened
        over), `bug_report`, and `bug_report_cancel`;
+     - a dialog UIKit refuses to show is an `error` where `bug_report_open`, and the report is cancelled, not left
+       open (`aDialogUIKitRefusesToShowLeavesNoReportOpen`, simulator);
      - each step that fails is its own `error` event (`bug_folder`, `bug_screenshot`, `bug_extra_files`,
        `bug_index`), and the report is still saved;
      - `bug_report` carries `index_written`.
