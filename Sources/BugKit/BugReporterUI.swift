@@ -150,7 +150,21 @@
       host.modalPresentationStyle = .formSheet
       host.presentationController?.delegate = dismissWatcher
       presented = host
-      top.present(host, animated: true)
+      top.present(host, animated: true) { [weak self] in
+        if self?.presented !== host { host.dismiss(animated: false) }
+      }
+      // UIKit drops a presentation it refuses (onto a dialog still closing on the Mac, #107) with only a console
+      // warning. A dropped dialog must not leave the report open, and one UIKit shows after all is closed when it
+      // finishes appearing.
+      guard host.presentingViewController != nil else {
+        hooks.logger(
+          "error",
+          ["where": "bug_report_open", "message": .string("dialog not shown over \(type(of: top))")])
+        presented = nil
+        screenshot = nil
+        flow.cancel()
+        return
+      }
       hooks.logger(
         "bug_report_open",
         [
@@ -182,9 +196,24 @@
       screenshot = nil
       // The next report's picture is of the screen underneath, so it waits for this dialog to be gone.
       host?.dismiss(animated: true) { [weak self] in
-        guard let self, self.flow.reopenIfPending() else { return }
-        self.present(source: .another, in: window ?? Self.keyWindow())
+        self?.reopen(after: host, in: window ?? Self.keyWindow())
       }
+    }
+
+    /// `.recapture`: opens the fresh report once `closed` has left `window`. On the Mac the dismissal's completion
+    /// runs while the closed dialog is still presented (#107), so the picture would show it and the new dialog,
+    /// presented onto it, would be dropped. Waits up to about two seconds, then tries anyway.
+    func reopen(after closed: UIViewController?, in window: UIWindow?, tries: Int = 40) {
+      if tries > 0, let closed, let root = window?.rootViewController,
+        sequence(first: root, next: \.presentedViewController).contains(where: { $0 === closed })
+      {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+          self?.reopen(after: closed, in: window, tries: tries - 1)
+        }
+        return
+      }
+      guard flow.reopenIfPending() else { return }
+      present(source: .another, in: window)
     }
 
     /// Remove the image from the current moment; context and other evidence remain attached.

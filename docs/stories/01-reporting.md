@@ -82,6 +82,7 @@ Part of the [BugKit stories](README.md).
 - **From:** EA #212 (story 022); MM story 061 (mmn-2jn); CG story 142, a85e228
 - **Status:**
   - `BugReportFlow.log(another:style:)`, verified on the host by `logItAndAnotherSavesThenOpensAFreshReport` and `recaptureClosesThenReopensAFreshReport`.
+  - `.recapture` waits for the closed dialog to leave before capturing (BugKit #107, CG #740), verified on the simulator by `anotherWaitsForTheClosedDialogToLeave`; Mac Catalyst itself is still to verify on the Mac.
   - Unique folders within one second are verified by `folderNamesAreUniqueWithinOneSecond`.
   - Two saves at once are verified by `sixtyFourConcurrentAppendsGiveSixtyFourValidLines`.
 
