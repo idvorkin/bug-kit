@@ -150,14 +150,16 @@
       host.modalPresentationStyle = .formSheet
       host.presentationController?.delegate = dismissWatcher
       presented = host
-      top.present(host, animated: true)
+      top.present(host, animated: true) { [weak self] in
+        if self?.presented !== host { host.dismiss(animated: false) }
+      }
       // UIKit drops a presentation it refuses (onto a dialog still closing on the Mac, #107) with only a console
-      // warning. A dropped dialog must not leave the report open.
+      // warning. A dropped dialog must not leave the report open, and one UIKit shows after all is closed when it
+      // finishes appearing.
       guard host.presentingViewController != nil else {
         hooks.logger(
           "error",
           ["where": "bug_report_open", "message": .string("dialog not shown over \(type(of: top))")])
-        host.dismiss(animated: false)  // a no-op if it was dropped; closes it if UIKit showed it after all
         presented = nil
         screenshot = nil
         flow.cancel()
