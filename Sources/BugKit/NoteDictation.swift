@@ -254,7 +254,7 @@ public struct DictationJoin: Equatable, Sendable {
               }
             } catch {
               guard let self, self.owner == generation, !Task.isCancelled else { return }
-              self.fail("Speech recognition stopped receiving audio", ["where": "audio_send"])
+              self.fail("Speech recognition stopped receiving audio", Self.fields(of: error, ["where": "audio_send"]))
               self.stop(why: "error")
             }
           }
@@ -267,14 +267,14 @@ public struct DictationJoin: Equatable, Sendable {
               if let self, self.owner == generation, self.listening { self.stop(why: "final") }
             } catch {
               guard let self, self.owner == generation, !Task.isCancelled else { return }
-              self.fail("The speech service stopped unexpectedly", ["where": "recognizer"])
+              self.fail("The speech service stopped unexpectedly", Self.fields(of: error, ["where": "recognizer"]))
               self.stop(why: "error")
             }
           }
         } catch {
           guard self.owner == generation, !Task.isCancelled else { await backend.cancel(); return }
           let message = (error as? DictationPermissionError)?.localizedDescription ?? "Voice input could not start"
-          self.fail(message, ["where": "start", "provider": .string(backend.name)])
+          self.fail(message, Self.fields(of: error, ["where": "start", "provider": .string(backend.name)]))
           self.stop(why: "error")
         }
       }
@@ -345,6 +345,15 @@ public struct DictationJoin: Equatable, Sendable {
       provider = nil; audioTask = nil; resultTask = nil; onText = nil
       listening = false; starting = false; processing = false
       logger("dictation_stop", ["why": .string(why)])
+    }
+
+    /// #117: what failed, carried into the copyable problem and the log: the error's own words, and its domain and code,
+    /// which say what refused (an audio session, a recognizer, the engine).
+    private static func fields(of error: Error, _ fields: [String: JSONValue]) -> [String: JSONValue] {
+      let ns = error as NSError
+      return fields.merging(
+        ["error": .string(error.localizedDescription), "domain": .string(ns.domain), "code": .int(ns.code)]
+      ) { first, _ in first }
     }
 
     private func fail(_ message: String, _ fields: [String: JSONValue]) {
