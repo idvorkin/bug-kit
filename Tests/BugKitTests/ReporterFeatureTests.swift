@@ -154,6 +154,24 @@ private func run(_ g: Double, hz: Double, seconds: Double, start: Double = 0, on
   #expect(join.note == "the time is skipped the rest")
 }
 
+// #113 (CG #822): on-device recognition handed over one transcript that was the phrase twice with no space.
+@Test(arguments: [false, true])
+func dictationATranscriptThatIsItsPhraseTwiceIsKeptOnce(_ final: Bool) {
+  var join = DictationJoin(typed: "")
+  join.update(
+    text: "I should be able to swipe to archiveI should be able to swipe to archive", firstStart: 0.3, lastEnd: 3.1,
+    isFinal: final)
+  #expect(join.note == "I should be able to swipe to archive")
+}
+
+// Speech that really repeats is kept: twice with a space between, a one-word double, and a phrase said once more.
+@Test(arguments: ["swipe to archive swipe to archive", "nono", "go go", "swipe to archive, swipe to archive"])
+func dictationSpeechThatRepeatsIsKeptAsSpoken(_ text: String) {
+  var join = DictationJoin(typed: "")
+  join.update(text: text, firstStart: 0.3, lastEnd: 2.0)
+  #expect(join.note == text)
+}
+
 @Test func dictationAFreshTranscriptionAfterAPauseIsAdded() {
   var join = DictationJoin(typed: "Cockpit:")
   join.update(text: "when I stop", firstStart: 0.5, lastEnd: 1.5)

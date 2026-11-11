@@ -39,7 +39,7 @@ public struct DictationJoin: Equatable, Sendable {
   /// results are treated as revisions. Returns true when a new stretch begins.
   @discardableResult
   public mutating func update(text: String, firstStart: Double, lastEnd: Double, isFinal: Bool = false, observedAudioEnd: Double? = nil) -> Bool {
-    let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    let text = Self.once(text.trimmingCharacters(in: .whitespacesAndNewlines))
     // Empty terminal results carry no replacement words.
     guard !text.isEmpty else { return false }
     var fresh = false
@@ -93,6 +93,18 @@ public struct DictationJoin: Equatable, Sendable {
 
   private static func join(_ a: String, _ b: String) -> String {
     a.isEmpty ? b : b.isEmpty ? a : "\(a) \(b)"
+  }
+
+  /// #113 (CG #822): on-device recognition can hand over one transcript that is the phrase twice with nothing between
+  /// ("…to archiveI should…"). No one says that, so it is kept once; a phrase of one word, or one repeated with a
+  /// space or a comma, is speech and stays as spoken.
+  private static func once(_ text: String) -> String {
+    guard text.count.isMultiple(of: 2) else { return text }
+    let half = text.prefix(text.count / 2)
+    guard half.contains(" "), let last = half.last, !last.isWhitespace, !last.isPunctuation,
+      text.hasSuffix(half)
+    else { return text }
+    return String(half)
   }
 
   private static func firstWord(_ s: String) -> Substring {

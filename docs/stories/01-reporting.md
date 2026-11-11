@@ -186,10 +186,13 @@ Part of the [BugKit stories](README.md).
 
 - **Summary:** Speak the note
 - **From:** CG #239 (story 142, "Speaking the note")
-- **Issues:** #7, #1 (voice-input clarification); beads bug-9j5, bug-ig8
+- **Issues:** #7, #1 (voice-input clarification), #113 (a transcript doubled with no space); beads bug-9j5, bug-ig8
 - **Status:**
   - `NoteDictation`, behind `options.dictation` (off by default: it needs the speech and microphone usage strings). Verified by typecheck.
   - `DictationText.merge` is verified on the host by `dictatedWordsGoAfterTheTypedNote`.
+  - A transcript that is its phrase twice with nothing between is kept once (#113, CG #822), verified on the host by
+    `dictationATranscriptThatIsItsPhraseTwiceIsKeptOnce`; speech that really repeats stays, by
+    `dictationSpeechThatRepeatsIsKeptAsSpoken`.
   - The permission prompts and music carrying on are device checks, still to do.
   - The error is a `BugProblemView` with Copy error, behind `options.copyableErrors` (on), from CG's ProblemView
     (bug-kit#7). The copied text is verified on the host by `BugProblemTests`; the view by typecheck. Pasting from a
@@ -205,7 +208,7 @@ Part of the [BugKit stories](README.md).
 - **Given:** the dialog is open, with or without words typed, and no call is up
 - **When:** I tap the microphone, say "the timer skipped the rest", and tap it again
 - **Then:**
-  - the words appear after anything I had typed;
+  - the words appear after anything I had typed, once, even when the recognizer hands them over twice with no space;
   - music that was playing keeps playing;
   - the log has `dictation_start` and `dictation_stop`.
 
