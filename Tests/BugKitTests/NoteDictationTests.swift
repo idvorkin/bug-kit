@@ -54,6 +54,24 @@ import Testing
 }
 
 @MainActor
+@Test func dictationStartFailureKeepsTheErrorThatCausedIt() async throws {
+  // #117: "Voice input could not start" alone can't say what refused the mic (context-grabber#876).
+  let fixture = try DictationFixture()
+  defer { fixture.cleanup() }
+  fixture.capture.startError = NSError(
+    domain: "com.apple.coreaudio.avfaudio", code: 561_015_905,
+    userInfo: [NSLocalizedDescriptionKey: "The session could not be activated"])
+  fixture.dictation.toggle(note: "typed") { fixture.note.value = $0 }
+  try await fixture.until { fixture.dictation.problem != nil && !fixture.dictation.busy }
+  #expect(fixture.dictation.problem == "Voice input could not start")
+  let state = fixture.dictation.problemState
+  #expect(state["where"] == .string("start"))
+  #expect(state["domain"] == .string("com.apple.coreaudio.avfaudio"))
+  #expect(state["code"] == .int(561_015_905))
+  #expect(state["error"] == .string("The session could not be activated"))
+}
+
+@MainActor
 @Test func dictationRemovedMicrophoneReturnsPickerToAutomatic() async throws {
   let fixture = try DictationFixture()
   defer { fixture.cleanup() }
@@ -306,10 +324,12 @@ private final class DictationFixture {
                 BugMicrophone(id: "usb", name: "USB Microphone", kind: "usbAudio")]
   var preferred: String?
   var starts = 0, restores = 0, lists = 0
+  var startError: Error?
   private var audio: AsyncStream<Data>.Continuation?
   func availableMicrophones() throws -> [BugMicrophone] { lists += 1; return inputs }
   func start(preferredInputID: String?) throws -> AsyncStream<Data> {
     starts += 1; preferred = preferredInputID
+    if let startError { throw startError }
     let (stream, continuation) = AsyncStream<Data>.makeStream()
     audio = continuation; continuation.yield(Data([0, 0]))
     return stream
