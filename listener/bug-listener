@@ -42,6 +42,7 @@ STATE = HOME / "tmp" / "agent" / "bugs"
 LOG = STATE / "listener.log"
 SEEN = STATE / "seen.json"
 INBOX = STATE / "inbox.jsonl"
+LOG_RETENTION_DAYS = 30  # matches BugKit's LogRetention on the device
 ISSUE_LIMIT = 10000  # gh issue list reads at most this many; a full read is treated as a failed lookup
 FIXED = {
     "id", "reported_at", "app", "bundle", "build", "commit", "device", "screen", "note", "log", "screenshot",
@@ -931,6 +932,50 @@ def poll_crashes(a: dict, dev: dict, local: Path, locked: Any, seen: dict, filer
             rec["files"].append(metadata)
             (local / metadata).write_text(json.dumps(rec, indent=2, sort_keys=True) + "\n")
             deliver(filer, a, rec, dev, local, entry, "crash_keys", seen, summary)
+        if logs_ready:
+            prune_local_logs(local)
+
+
+def prune_local_logs(local: Path, days: int = LOG_RETENTION_DAYS) -> None:
+    """Delete session logs in `local/logs` last changed more than `days` ago, except a log a report names (in the
+    copied `bugs.jsonl` or a crash's `.report.json`), so the Mac copy stays bounded like the device's. A report
+    file that cannot be read means the reported logs are unknown, so nothing is pruned. Never fatal."""
+    logs = local / "logs"
+    if DRY or not logs.is_dir():
+        return
+    referenced: set[str] = set()
+    sources = [local / "bugs.jsonl"] if (local / "bugs.jsonl").exists() else []
+    sources += sorted(local.rglob("*.report.json"))
+    for path in sources:
+        try:
+            text = path.read_text(errors="strict")
+        except (OSError, ValueError) as error:
+            log("logs_prune", local=tilde(local), ok=False, message=f"{path.name} unreadable; nothing pruned: {error}")
+            return
+        lines = text.split("\n") if path.name == "bugs.jsonl" else [text]
+        for line in lines:
+            try:
+                rec = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(rec, dict) and isinstance(rec.get("log"), str) and rec["log"]:
+                referenced.add(Path(rec["log"]).name)
+    cutoff = time.time() - days * 86400
+    count, size, kept = 0, 0, 0
+    for path in sorted(logs.rglob("*.jsonl")):
+        try:
+            stat = path.stat()
+            if not path.is_file() or stat.st_mtime >= cutoff:
+                continue
+            if path.name in referenced:
+                kept += 1
+                continue
+            path.unlink()
+            count += 1
+            size += stat.st_size
+        except OSError as error:
+            log("logs_prune", local=tilde(local), file=path.name, ok=False, message=str(error))
+    log("logs_pruned", local=tilde(local), count=count, bytes=size, kept_for_reports=kept)
 
 
 # --- usage summary ------------------------------------------------------------------------------------------
@@ -1014,6 +1059,7 @@ def weekly_usage(cfg: dict, reached: list[tuple[dict, dict, Path, Any]], health:
                 got = copy(dev, a, a.get("log_dir", "Documents/logs"), logs, locked, allow_missing=True)
                 if got and got != NOT_INSTALLED and logs.is_dir():
                     shutil.copytree(logs, local / "logs", dirs_exist_ok=True)
+                    prune_local_logs(local)
         except OSError as error:
             got = False
             log("usage_error", app=a["name"], device=dev["dir"], message=str(error))

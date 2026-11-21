@@ -710,6 +710,25 @@ def test_crash_session_uses_preceding_start_not_relaunch(crash_device, listener_
     assert records[0]["context"]["session_match"].startswith("inferred")
 
 
+def test_a_fresh_crash_keeps_its_old_session_log_on_the_mac(crash_device, listener_state, monkeypatch):
+    cfg, files, _ = crash_device
+    epoch = int(bl.parse_time("2026-10-10T00:01:00Z").timestamp())
+    files[f"signal-{epoch}.txt"] = "signal 11\n"
+    device_copy = bl.copy
+
+    def copy(dev, a, source, dest, locked, **kwargs):
+        ok = device_copy(dev, a, source, dest, locked, **kwargs)
+        if source == "Documents/logs":
+            for name in ("previous.jsonl", "relaunch.jsonl"):
+                aged(dest / name, 40, (dest / name).read_text())
+        return ok
+    monkeypatch.setattr(bl, "copy", copy)
+    bl.poll(cfg, backfill=True)
+    logs = listener_state / "app" / "iphone" / "logs"
+    assert (logs / "previous.jsonl").exists()
+    assert not (logs / "relaunch.jsonl").exists()
+
+
 def test_metrickit_hangs_file_without_claiming_delivery_is_crash_time(crash_device, listener_state, monkeypatch):
     cfg, files, _ = crash_device
     files["20261010-020000.json"] = json.dumps({"hangDiagnostics": [{"callStackTree": {}}]})
@@ -1457,3 +1476,55 @@ def test_usage_command_reads_pulled_logs_without_contacting_devices(cli_config, 
     assert data["app"] == "app" and data["sessions"] == 1 and data["controls"] == [["go", 1]]
     text = invoke(["usage", "--config", str(cli_config)])
     assert "app: 1 session(s)" in text.output and "home 1" in text.output
+
+
+def aged(path, days, text="{}\n"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text)
+    moment = bl.time.time() - days * 86400
+    bl.os.utime(path, (moment, moment))
+    return path
+
+
+def test_local_logs_older_than_the_retention_go_unless_a_report_names_them(listener_state):
+    local = listener_state / "app" / "iphone"
+    old = aged(local / "logs" / "old.jsonl", 31)
+    fresh = aged(local / "logs" / "fresh.jsonl", 2)
+    reported = aged(local / "logs" / "reported.jsonl", 40)
+    crashed = aged(local / "logs" / "nested" / "crashed.jsonl", 40)
+    (local / "bugs.jsonl").write_text(json.dumps({"id": "A", "log": "logs/reported.jsonl"}) + "\nnot json\n")
+    (local / "crashes").mkdir(parents=True)
+    (local / "crashes" / "signal-1.txt.report.json").write_text(json.dumps({"log": "logs/nested/crashed.jsonl"}))
+    bl.prune_local_logs(local)
+    assert not old.exists()
+    assert fresh.exists() and reported.exists() and crashed.exists()
+    (event,) = [json.loads(l) for l in bl.LOG.read_text().splitlines() if json.loads(l)["event"] == "logs_pruned"]
+    assert event["count"] == 1 and event["kept_for_reports"] == 2 and event["bytes"] == 3
+
+
+def test_an_unreadable_report_index_prunes_nothing(listener_state):
+    local = listener_state / "app" / "iphone"
+    old = aged(local / "logs" / "old.jsonl", 31)
+    (local / "bugs.jsonl").write_bytes(b"\xff\xfe")  # not UTF-8: which logs reports name is unknown
+    bl.prune_local_logs(local)
+    assert old.exists()
+
+
+def test_a_dry_run_prunes_nothing(listener_state, monkeypatch):
+    monkeypatch.setattr(bl, "DRY", True)
+    old = aged(listener_state / "app" / "iphone" / "logs" / "old.jsonl", 31)
+    bl.prune_local_logs(listener_state / "app" / "iphone")
+    assert old.exists()
+
+
+def test_the_weekly_usage_pull_prunes_old_local_logs(usage_device, listener_state):
+    cfg, copies = usage_device
+    stale = aged(listener_state / "app" / "iphone" / "logs" / "gone-from-device.jsonl", 45)
+    bl.poll(cfg, False)
+    status = bl.read_status()
+    status["usage_last"] = iso(8)
+    bl.save_status(status)
+    bl.poll(cfg, False)
+    assert copies.count("Documents/logs") == 1
+    assert (listener_state / "app" / "iphone" / "logs" / "app-1.jsonl").exists()
+    assert not stale.exists()
