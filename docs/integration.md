@@ -87,6 +87,14 @@ NavigationStack { WhatsNewView(feed: whatsNew, logger: log.logger) }
   the report. Only the shaken window's scene opens it, so each scene can have its own `.bugReporting`. Remove any
   app-owned `ShakeDetector` or `UIWindow.motionEnded` override: two overrides collide.
 - `reporter.lastStatus` says "Problem logged. Thanks." after a save, for a status line.
+- `reporter.onOutcome = { outcome in ... }` (and the published `reporter.lastOutcome`) says what became of the report
+  (#120): `.saved(id:queued:)` once bugs.jsonl holds it (`queued` when the CloudKit delivery took it to upload; the
+  upload itself is later and not reported), `.failed(id:)` when bugs.jsonl did not take it, `.cancelled` when the
+  dialog closed without saving or could not be shown. Show "Sent ✓" on `.saved`, not when the dialog closes. "Log it
+  and another" gives one `.saved` per report. Outcomes arrive as they finish: a save is asynchronous, so a report's
+  `.saved` or `.failed` can arrive after a later `.cancelled` (for example "Log it and another" then Cancel), and
+  `lastOutcome` is the most recent outcome, not the state of the open dialog. Show "Sent ✓" on any `.saved` rather
+  than resolving on the first outcome after `open`.
 - `log.status(every: 5) { [...] }` writes a periodic status line.
 - Add `memory: true` to include resident memory (`rss_mb`); create the logger with `clocks: [.wall, .mono]`
   to include wall-clock and host-uptime timestamps. See [logging conventions](ops/logging.md).

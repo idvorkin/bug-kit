@@ -114,7 +114,7 @@ public struct BugReportWriter: Sendable {
     log: (path: String, tMs: Int)?, extraFiles: BugExtraFiles?, date: Date = Date(),
     diagnostics: BugDiagnosticsSnapshot = BugDiagnosticsSnapshot(), source: String? = nil,
     reason: String? = nil, event: String = "bug_report", copySessionLog: Bool? = nil, screenshotDropped: Bool = false
-  ) async -> (report: BugReport, indexWritten: Bool) {
+  ) async -> (report: BugReport, indexWritten: Bool, outcome: BugReportOutcome) {
     // This must precede all report work, especially append: a launch Task may not have run yet,
     // and termination after append must not classify this report as pre-opt-in on restart.
     if let delivery {
@@ -197,15 +197,18 @@ public struct BugReportWriter: Sendable {
     if let source { fields["source"] = .string(source) }
     if let reason { fields["reason"] = .string(reason) }
     logger(event, fields)
+    var queued = false
     if let delivery {
-      do { try await delivery.enqueue(report, documents: store.documents) }
-      catch {
+      do {
+        try await delivery.enqueue(report, documents: store.documents)
+        queued = true
+      } catch {
         logger("error", ["where": "bug_delivery_enqueue", "id": .string(report.id.uuidString),
                          "message": CloudReportOutbox.skipReason(error) == nil
                            ? "Cloud delivery is pending; the report remains local."
                            : "Cloud delivery gave up on this report (bug_delivery_skipped); it remains local."])
       }
     }
-    return (report, indexWritten)
+    return (report, indexWritten, indexWritten ? .saved(id: report.id, queued: queued) : .failed(id: report.id))
   }
 }
