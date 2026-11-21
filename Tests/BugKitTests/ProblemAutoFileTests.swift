@@ -37,6 +37,35 @@ private actor RecordingDelivery: BugReportDelivery {
   func enqueue(_ report: BugReport, documents: URL) async throws { enqueued.append(report.id) }
 }
 
+/// Waits in `prepare`, as a cloud activation does, and counts the most takes in it at once.
+private actor SlowDelivery: BugReportDelivery {
+  private(set) var enqueued: [UUID] = []
+  private(set) var most = 0
+  private(set) var inside = 0
+  func prepare(documents: URL) async throws {
+    inside += 1
+    most = max(most, inside)
+    try await Task.sleep(for: .milliseconds(100))
+    inside -= 1
+  }
+  func enqueue(_ report: BugReport, documents: URL) async throws { enqueued.append(report.id) }
+}
+
+/// Waits in the first `enqueue`, as an upload hand-off can, so a second take can start mid-folder.
+private actor WaitingDelivery: BugReportDelivery {
+  private(set) var enqueued: [UUID] = []
+  private(set) var waiting = false
+  func prepare(documents: URL) async throws {}
+  func enqueue(_ report: BugReport, documents: URL) async throws {
+    let first = enqueued.isEmpty
+    enqueued.append(report.id)
+    guard first else { return }
+    waiting = true
+    try await Task.sleep(for: .milliseconds(200))
+    waiting = false
+  }
+}
+
 private let appInfo = BugAppInfo(
   app: "Demo", bundle: "com.example.demo", build: "1.0 (1)", commit: "abc1234", device: "iPhone18,1")
 private let extensionInfo = BugAppInfo(
@@ -224,6 +253,99 @@ private let problem = BugProblem(
     #expect(log.fields("error").isEmpty)
     #expect(!FileManager.default.fileExists(atPath: shared.documents.appendingPathComponent(saved.folder).path))
     #expect(try FileManager.default.contentsOfDirectory(atPath: group.path) == ["bugkit-share"])
+  }
+
+  /// The indexes an adopt set aside in `group` and kept for the next take.
+  private func asides(in group: URL) throws -> [URL] {
+    try FileManager.default.contentsOfDirectory(atPath: group.path).filter { $0.hasPrefix("bugkit-share.taking-") }
+      .map { group.appendingPathComponent($0) }
+  }
+
+  @Test func aReportNotWrittenHereIsKeptForTheNextTake() async throws {
+    let group = try temporaryFolder("group-unwritten")
+    let shared = BugStore(documents: group.appendingPathComponent("bugkit-share"))
+    let saved = try #require(
+      await BugAutoReporter(writer: BugReportWriter(store: shared, info: extensionInfo, logger: log.logger))
+        .report(problem: problem))
+    // The app's index cannot be written: it links into a folder that is not there.
+    let appDocs = try temporaryFolder("app-unwritten")
+    let appStore = BugStore(documents: appDocs)
+    try FileManager.default.createSymbolicLink(
+      at: appStore.index, withDestinationURL: appDocs.appendingPathComponent("missing/bugs.jsonl"))
+    let writer = BugReportWriter(store: appStore, info: appInfo, logger: log.logger)
+    #expect(await writer.adopt(from: shared).isEmpty)
+    #expect(try asides(in: group).count == 1)
+    try FileManager.default.removeItem(at: appStore.index)
+    #expect(await writer.adopt(from: shared).map(\.id) == [saved.id])
+    let report = try #require(try appStore.readAll().reports.first)
+    #expect(try appStore.readAll().reports.map(\.id) == [saved.id])
+    #expect(try FileManager.default.contentsOfDirectory(atPath: appDocs.appendingPathComponent("bugs").path)
+      .map { "bugs/\($0)" } == [report.folder])
+    #expect(try asides(in: group).isEmpty)
+  }
+
+  @Test func anIndexNotReadIsKeptForTheNextTake() async throws {
+    let group = try temporaryFolder("group-unread")
+    let shared = BugStore(documents: group.appendingPathComponent("bugkit-share"))
+    let saved = try #require(
+      await BugAutoReporter(writer: BugReportWriter(store: shared, info: extensionInfo, logger: log.logger))
+        .report(problem: problem))
+    let line = try Data(contentsOf: shared.index)
+    try Data([0xFF, 0xFE, 0x0A]).write(to: shared.index)  // not UTF-8: the extension's index cannot be read
+    let appStore = BugStore(documents: try temporaryFolder("app-unread"))
+    let writer = BugReportWriter(store: appStore, info: appInfo, logger: log.logger)
+    #expect(await writer.adopt(from: shared).isEmpty)
+    let aside = try #require(try asides(in: group).first)
+    // Nor is the app's own index: without it nothing tells a report already taken.
+    try line.write(to: aside.appendingPathComponent("bugs.jsonl"))
+    try FileManager.default.createDirectory(at: appStore.index, withIntermediateDirectories: true)
+    #expect(await writer.adopt(from: shared).isEmpty)
+    #expect(try asides(in: group).contains(aside))
+    try FileManager.default.removeItem(at: appStore.index)
+    #expect(await writer.adopt(from: shared).map(\.id) == [saved.id])
+    #expect(try asides(in: group).isEmpty)
+  }
+
+  @Test func overlappingTakesTakeAReportOnce() async throws {
+    let group = try temporaryFolder("group-overlap")
+    let shared = BugStore(documents: group.appendingPathComponent("bugkit-share"))
+    let saved = try #require(
+      await BugAutoReporter(writer: BugReportWriter(store: shared, info: extensionInfo, logger: log.logger))
+        .report(problem: problem))
+    let appStore = BugStore(documents: try temporaryFolder("app-overlap"))
+    let delivery = SlowDelivery()
+    let writer = BugReportWriter(store: appStore, info: appInfo, logger: log.logger, delivery: delivery)
+    // The second starts while the first waits mid-take, having set the index aside but appended nothing yet.
+    let first = Task { await writer.adopt(from: shared) }
+    while await delivery.inside == 0 { await Task.yield() }
+    let second = Task { await writer.adopt(from: shared) }
+    #expect(await (first.value + second.value).map(\.id) == [saved.id])
+    #expect(try appStore.readAll().reports.map(\.id) == [saved.id])
+    #expect(await delivery.enqueued == [saved.id])
+    #expect(await delivery.most == 1)
+  }
+
+  @Test func aTakeStartedMidFolderTakesNoReportTwice() async throws {
+    let group = try temporaryFolder("group-midfolder")
+    let shared = BugStore(documents: group.appendingPathComponent("bugkit-share"))
+    let extensionWriter = BugReportWriter(store: shared, info: extensionInfo, logger: log.logger)
+    let a = try #require(await BugAutoReporter(writer: extensionWriter).report(problem: problem))
+    let other = BugProblem(message: "Card could not save", context: "ShareCard.save", build: "1.0 (1) abc1234")
+    let b = try #require(await BugAutoReporter(writer: extensionWriter).report(problem: other))
+    let appStore = BugStore(documents: try temporaryFolder("app-midfolder"))
+    let delivery = WaitingDelivery()
+    let writer = BugReportWriter(store: appStore, info: appInfo, logger: log.logger, delivery: delivery)
+    // The first waits in A's hand-off; the second then finds the same aside, with A held and B not yet taken.
+    let first = Task { await writer.adopt(from: shared) }
+    while await !delivery.waiting { await Task.yield() }
+    let second = Task { await writer.adopt(from: shared) }
+    let taken = await first.value + second.value
+    #expect(Set(taken.map(\.id)) == [a.id, b.id])
+    #expect(taken.count == 2)
+    let held: [String] = try appStore.readAll().reports.map(\.id.uuidString).sorted()
+    let expected: [String] = [a.id.uuidString, b.id.uuidString].sorted()
+    #expect(held == expected)
+    #expect(await delivery.enqueued.count == 2)
   }
 
   @Test func aStoreFolderNotMadeYetStillKeepsTheWindow() async throws {

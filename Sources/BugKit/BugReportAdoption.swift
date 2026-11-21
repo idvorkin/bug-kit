@@ -13,10 +13,17 @@ extension BugReportWriter {
   /// saving meanwhile starts a fresh index; an index left aside by a take that was killed is finished first. Report
   /// folders, `logs/` and `bugs-auto.json` (its rate-limit state) stay in the live store, so a running extension keeps
   /// writing its session log and its window holds across takes. Each report's files and log are copied from the live
-  /// store, and its folder there is deleted once this store holds it; the aside index is then deleted. Logs
-  /// `bug_report_adopted` for each report and returns them.
+  /// store, and its folder there is deleted once this store holds it; the aside index is then deleted. An aside
+  /// index is kept for the next take when it cannot be read, this store's own index cannot be read, or a report in it
+  /// is not written here; a report already held is skipped then, so none is lost and none is taken twice. Takes in
+  /// one process run one at a time, so two overlapping calls never both take a report. Logs `bug_report_adopted`
+  /// for each report and returns them.
   @discardableResult
   public func adopt(from source: BugStore) async -> [BugReport] {
+    await AdoptionQueue.shared.run { await adoptNow(from: source) }
+  }
+
+  private func adoptNow(from source: BugStore) async -> [BugReport] {
     let fm = FileManager.default
     let parent = source.documents.deletingLastPathComponent()
     let prefix = source.documents.lastPathComponent + ".taking-"
@@ -40,15 +47,21 @@ extension BugReportWriter {
                          "message": "Cloud delivery activation failed; saving the report locally."])
       }
     }
-    var held = Set(((try? store.readAll().reports) ?? []).map(\.id))
+    // Without this store's index nothing tells a report already taken, so every aside waits for the next take.
+    var held: Set<UUID>
+    do { held = Set(try store.readAll().reports.map(\.id)) } catch {
+      logger("error", ["where": "bug_adopt_held", "message": .string("\(error)")])
+      return []
+    }
     var taken: [BugReport] = []
     for folder in staged {
       let from = BugStore(documents: folder)
       let reports: [BugReport]
       do { reports = try from.readAll().reports } catch {
         logger("error", ["where": "bug_adopt_read", "message": .string("\(error)")])
-        reports = []
+        continue
       }
+      var missed = false
       for original in reports {
         let made = source.documents.appendingPathComponent(original.folder, isDirectory: true)
         func clear() {
@@ -58,7 +71,7 @@ extension BugReportWriter {
           }
         }
         if held.contains(original.id) { clear(); continue }
-        guard let report = take(original, from: source.documents) else { continue }
+        guard let report = take(original, from: source.documents) else { missed = true; continue }
         clear()
         held.insert(report.id)
         taken.append(report)
@@ -74,6 +87,8 @@ extension BugReportWriter {
           }
         }
       }
+      // A report not written here keeps its line in the aside, for the next take.
+      if missed { continue }
       do { try fm.removeItem(at: folder) } catch {
         logger("error", ["where": "bug_adopt_remove", "message": .string("\(error)")])
       }
@@ -122,7 +137,25 @@ extension BugReportWriter {
       return report
     } catch {
       logger("error", ["where": "bug_index", "id": .string(original.id.uuidString), "message": .string("\(error)")])
+      if !report.folder.isEmpty {
+        do { try FileManager.default.removeItem(at: store.documents.appendingPathComponent(report.folder)) } catch {
+          logger("error", ["where": "bug_adopt_remove", "message": .string("\(error)")])
+        }
+      }
       return nil
     }
+  }
+}
+
+/// Runs one take at a time in this process: each waits for the one before it to finish.
+private actor AdoptionQueue {
+  static let shared = AdoptionQueue()
+  private var last: Task<Void, Never>?
+
+  func run(_ work: @escaping @Sendable () async -> [BugReport]) async -> [BugReport] {
+    let before = last
+    let task = Task { await before?.value; return await work() }
+    last = Task { _ = await task.value }
+    return await task.value
   }
 }

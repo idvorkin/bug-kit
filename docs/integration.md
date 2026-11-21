@@ -195,8 +195,10 @@ index), copies each report's files and session log into a new folder in the app'
 `bundle` (the listener files by bundle) with the extension's bundle kept as `context.extension`, appends its line,
 hands it to `delivery`, logs `bug_report_adopted`, and deletes the report's folder in the extension's store and the
 index it moved aside. A report the app's store already
-holds is never added twice, and a take that was killed is finished on the next call. Use a folder of the group for
-the extension alone. The extension's `logs/` and rate-limit state (`bugs-auto.json`) stay where they are, so a
+holds is never added twice, and a take that was killed is finished on the next call. An index moved aside is kept for
+the next call when it cannot be read, the app's own index cannot be read, or a report in it was not written to the
+app's store. Calls in one process run one at a time, so overlapping calls never take a report twice. Use a folder of
+the group for the extension alone. The extension's `logs/` and rate-limit state (`bugs-auto.json`) stay where they are, so a
 running extension keeps its session log and the window holds.
 
 See [per-app adoption](migration.md#adopting-the-merged-features) before replacing a diagnostics gist or removing
