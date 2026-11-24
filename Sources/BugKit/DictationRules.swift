@@ -17,30 +17,27 @@ enum DictationRules {
     return !changesOtherAudio && (ambient || mixesWithOthers)
   }
 
-  /// What to do when the audio engine is reconfigured while dictating (#128). A running engine needs nothing. A stopped
-  /// one is rebuilt once if the change came in the first second, or the first two while the input is a Bluetooth HFP
-  /// headset (its link can still be coming up as dictation starts); otherwise dictation stops.
-  ///
-  /// #139: an engine change that comes with the input going back to the picked microphone rebuilds onto it, whenever it
-  /// comes, at most `pickRebuildLimit` times in one recording.
-  static func engineChange(
-    sinceStart: Double, running: Bool, rebuilt: Bool, after: DictationAudioShape, backOnPick: Bool = false,
-    pickRebuilds: Int = 0
-  ) -> DictationEngineChange {
+  /// What to do when the audio engine is reconfigured while dictating (#128, #142). A running engine needs nothing. A
+  /// stopped one is rebuilt on the input as it is now, whenever the change comes (a headset settling at start, a USB
+  /// microphone or a headset taking the input later, the input going back to the pick), so dictation follows the
+  /// route; only a run of `rebuildLimit` rebuilds inside `rebuildWindow` seconds (a route flapping) stops it.
+  static func engineChange(running: Bool, recentRebuilds: Int) -> DictationEngineChange {
     if running { return .ignore }
-    if backOnPick, pickRebuilds < pickRebuildLimit { return .rebuild }
-    return !rebuilt && sinceStart < settling(after) ? .rebuild : .fail
+    return recentRebuilds < rebuildLimit ? .rebuild : .fail
   }
 
-  static let pickRebuildLimit = 2
+  static let rebuildLimit = 3
+  static let rebuildWindow = 10.0
 
-  /// Whether the input moving to another microphone stops dictation: only once the engine change's settling time has
-  /// passed, so an input moving onto the headset as dictation starts is left to the engine rebuild, and never when it
-  /// moves back onto the microphone that was picked (#139).
-  static func routeChangeStops(
-    sinceStart: Double, inputChanged: Bool, after: DictationAudioShape, backOnPick: Bool = false
-  ) -> Bool {
-    !backOnPick && inputChanged && sinceStart >= settling(after)
+  /// How many of this recording's rebuilds (their uptimes) fall inside the window before `now`.
+  static func recentRebuilds(_ times: [Double], now: Double) -> Int {
+    times.filter { now - $0 <= rebuildWindow }.count
+  }
+
+  /// What a route change while dictating does (#142): never stop. The input moving is followed (the engine change that
+  /// comes with it rebuilds onto the new input); moving back onto the pick is named as such (#139).
+  static func routeChange(inputChanged: Bool, backOnPick: Bool) -> DictationRouteChange {
+    backOnPick ? .backOnPick : inputChanged ? .follow : .keep
   }
 
   /// #139: the input is back on the microphone that was picked, and the tap was installed on another one (the headset
@@ -67,10 +64,6 @@ enum DictationRules {
     ]
   }
 
-  private static func settling(_ shape: DictationAudioShape) -> Double {
-    shape.inputPorts.contains("BluetoothHFP") ? 2.0 : 1.0
-  }
-
   /// The `dictation_engine_config` log line, and the state a failure copies: what the microphone was when the tap was
   /// installed, what it is now, and what was done.
   static func engineChangeFields(
@@ -91,9 +84,10 @@ enum DictationEngineChange: String, Sendable {
   case ignore, rebuild, fail
 }
 
-/// What a route change while dictating did (#139): nothing, nothing because the input came back to the pick, or stop.
+/// What a route change while dictating did (#139, #142): nothing, followed the input to another microphone, or the
+/// input came back to the pick. It never stops dictation.
 enum DictationRouteChange: String, Sendable {
-  case keep, stop
+  case keep, follow
   case backOnPick = "back_on_pick"
 }
 

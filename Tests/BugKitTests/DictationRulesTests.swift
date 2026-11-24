@@ -41,39 +41,33 @@ import Testing
   #expect(!DictationRules.endsQuietly(nil, finishing: true))
 }
 
-// #128: AirPods' HFP link takes the input as dictation starts and the engine stops about 150 ms in.
-@Test func anEarlyEngineChangeRebuildsTheMicrophoneOnce() {
-  let builtIn = DictationAudioShape(
-    sampleRate: 48_000, channels: 1, inputPorts: ["MicrophoneBuiltIn"], outputPorts: ["Speaker"], ioBufferDuration: 0.02
-  )
-  let airPods = DictationAudioShape(
-    sampleRate: 24_000, channels: 1, inputPorts: ["BluetoothHFP"], outputPorts: ["BluetoothHFP"],
-    ioBufferDuration: 0.016)
+// #128, #142: the engine stops when the input changes; it is rebuilt on the new input whenever that comes, so a
+// headset settling at start and a mid-dictation move (CG #1398: AirPods HFP 24 kHz mono to USB 48 kHz stereo, 1065 ms
+// in) both keep listening. Only a run of rebuilds (a route flapping) stops it.
+@Test func aStoppedEngineIsRebuiltOnTheNewInputWheneverItChanges() {
   // Still running: only logged.
-  #expect(DictationRules.engineChange(sinceStart: 0.1, running: true, rebuilt: false, after: airPods) == .ignore)
-  // Stopped in the first second: rebuild, once.
-  #expect(DictationRules.engineChange(sinceStart: 0.144, running: false, rebuilt: false, after: builtIn) == .rebuild)
-  #expect(DictationRules.engineChange(sinceStart: 0.3, running: false, rebuilt: true, after: airPods) == .fail)
-  // A headset still settling gets two seconds; any other input one.
-  #expect(DictationRules.engineChange(sinceStart: 1.5, running: false, rebuilt: false, after: airPods) == .rebuild)
-  #expect(DictationRules.engineChange(sinceStart: 1.5, running: false, rebuilt: false, after: builtIn) == .fail)
-  #expect(DictationRules.engineChange(sinceStart: 2.5, running: false, rebuilt: false, after: airPods) == .fail)
+  #expect(DictationRules.engineChange(running: true, recentRebuilds: 0) == .ignore)
+  #expect(DictationRules.engineChange(running: true, recentRebuilds: 9) == .ignore)
+  // Stopped: rebuilt, early or late, up to the limit in the window.
+  #expect(DictationRules.engineChange(running: false, recentRebuilds: 0) == .rebuild)
+  #expect(DictationRules.engineChange(running: false, recentRebuilds: DictationRules.rebuildLimit - 1) == .rebuild)
+  #expect(DictationRules.engineChange(running: false, recentRebuilds: DictationRules.rebuildLimit) == .fail)
 }
 
-// #128: the input moving onto AirPods as dictation starts is left to the engine rebuild, not stopped as a route change.
-@Test func anInputMovingOntoTheHeadsetAtStartIsLeftToTheEngineRebuild() {
-  let airPods = DictationAudioShape(
-    sampleRate: 24_000, channels: 1, inputPorts: ["BluetoothHFP"], outputPorts: ["BluetoothHFP"],
-    ioBufferDuration: 0.016)
-  let usb = DictationAudioShape(
-    sampleRate: 48_000, channels: 1, inputPorts: ["USBAudio"], outputPorts: ["Speaker"], ioBufferDuration: 0.01)
-  #expect(!DictationRules.routeChangeStops(sinceStart: 0.8, inputChanged: true, after: airPods))
-  #expect(!DictationRules.routeChangeStops(sinceStart: 1.5, inputChanged: true, after: airPods))
-  #expect(DictationRules.routeChangeStops(sinceStart: 2.5, inputChanged: true, after: airPods))
-  #expect(DictationRules.routeChangeStops(sinceStart: 1.2, inputChanged: true, after: usb))
-  #expect(!DictationRules.routeChangeStops(sinceStart: 0.4, inputChanged: true, after: usb))
-  #expect(!DictationRules.routeChangeStops(sinceStart: 5, inputChanged: false, after: usb))
-  #expect(!DictationRules.routeChangeStops(sinceStart: 0.1, inputChanged: false, after: airPods))
+// #142: rebuilds count only inside the window, so a route that changes now and then keeps following it.
+@Test func onlyRecentRebuildsCountTowardTheLimit() {
+  let window = DictationRules.rebuildWindow
+  #expect(DictationRules.recentRebuilds([], now: 100) == 0)
+  #expect(DictationRules.recentRebuilds([95, 99], now: 100) == 2)
+  #expect(DictationRules.recentRebuilds([100 - window - 0.1, 99], now: 100) == 1)
+  #expect(DictationRules.recentRebuilds([1, 2, 3], now: 100) == 0)
+}
+
+// #142: a route change never stops dictation; it is logged as following the new input, or back on the pick (#139).
+@Test func aRouteChangeFollowsTheNewInput() {
+  #expect(DictationRules.routeChange(inputChanged: true, backOnPick: false) == .follow)
+  #expect(DictationRules.routeChange(inputChanged: true, backOnPick: true) == .backOnPick)
+  #expect(DictationRules.routeChange(inputChanged: false, backOnPick: false) == .keep)
 }
 
 @Test func anEngineChangeCarriesWhatChanged() {
@@ -106,33 +100,6 @@ import Testing
   #expect(early["sample_rate_after"] == .double(24_000))
 }
 
-// #139: the input picked (the built-in mic) is taken by AirPods at start, rebuilt onto them, then given back about 4 s in.
-@Test func theInputComingBackToThePickKeepsDictating() {
-  let builtIn = DictationAudioShape(
-    sampleRate: 48_000, channels: 1, inputPorts: ["MicrophoneBuiltIn"], outputPorts: ["Speaker"], ioBufferDuration: 0.02
-  )
-  // The route change back onto the pick never stops dictation, whenever it comes.
-  #expect(!DictationRules.routeChangeStops(sinceStart: 4.1, inputChanged: true, after: builtIn, backOnPick: true))
-  #expect(DictationRules.routeChangeStops(sinceStart: 4.1, inputChanged: true, after: builtIn, backOnPick: false))
-  // Its engine change rebuilds onto the pick even after the start rebuild, at most twice in one recording.
-  #expect(
-    DictationRules.engineChange(
-      sinceStart: 4.2, running: false, rebuilt: true, after: builtIn, backOnPick: true, pickRebuilds: 0) == .rebuild)
-  #expect(
-    DictationRules.engineChange(
-      sinceStart: 9, running: false, rebuilt: true, after: builtIn, backOnPick: true, pickRebuilds: 1) == .rebuild)
-  #expect(
-    DictationRules.engineChange(
-      sinceStart: 12, running: false, rebuilt: true, after: builtIn, backOnPick: true, pickRebuilds: 2) == .fail)
-  #expect(
-    DictationRules.engineChange(
-      sinceStart: 4.2, running: true, rebuilt: true, after: builtIn, backOnPick: true, pickRebuilds: 0) == .ignore)
-  // Not back on the pick: the #128 rule as before.
-  #expect(
-    DictationRules.engineChange(
-      sinceStart: 4.2, running: false, rebuilt: true, after: builtIn, backOnPick: false, pickRebuilds: 0) == .fail)
-}
-
 // #139: back on the pick needs a pick, the input now on it, and the tap installed on another input.
 @Test func backOnThePickNeedsAPickTheTapLeft() {
   let pick = "Built-In Microphone"
@@ -161,9 +128,9 @@ import Testing
   #expect(fields["action"] == .string("back_on_pick"))
   let automatic = DictationRules.routeChangeFields(
     sinceStart: 3, reason: "old_device_unavailable", inputBefore: ["BluetoothHFP"], inputAfter: [], inputAtStart: nil,
-    inputNow: nil, picked: nil, action: .stop)
+    inputNow: nil, picked: nil, action: .follow)
   #expect(automatic["picked"] == JSONValue.null)
   #expect(automatic["input_id_now"] == JSONValue.null)
   #expect(automatic["input_after"] == .string(""))
-  #expect(automatic["action"] == .string("stop"))
+  #expect(automatic["action"] == .string("follow"))
 }
