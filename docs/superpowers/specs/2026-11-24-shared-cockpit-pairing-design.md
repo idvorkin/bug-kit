@@ -1,6 +1,8 @@
 # Shared Cockpit pairing across Igor's apps (design proposal, #144)
 
-Status: proposal for Igor's choice. No code until he picks an option.
+Status: decided. Igor picked C on 2026-11-24: per-app keys plus a shared device identity, one approval tap per device.
+BugKit builds the app side; Larry builds the keyring side ('approve every pending request from this device',
+'revoke device').
 
 ## Summary
 
@@ -45,13 +47,32 @@ in the Inbox, done. Pairing once per device should be enough for every app where
 | Needs shared keychain across apps | No | Yes (same team, a shared keychain group) | Yes, for the device identity only |
 | Server change | None | None | Small: an "approve all pending for this device" button, and "revoke device" |
 
-## Recommendation
+## Decision
 
-**C.** Keep one key per app, so each app holds only its own scopes and can be revoked alone, which was Igor's 11/22
+**C (Igor, 2026-11-24).** Keep one key per app, so each app holds only its own scopes and can be revoked alone, which was Igor's 11/22
 reason. Share what's harmless to share: the device's identity (its label and the Cockpit's address) in a keychain
 group all of Igor's apps can read, so the second app on a device needs nothing typed. Ask keyring for one small
 addition, "approve every pending request from this device" on the card, so a new phone is one tap even with four
-apps. If Igor prefers fewest moving parts over per-app revocation, B is simpler and works today.
+apps. (B, one shared key, was the simpler fallback; not chosen.)
+
+## What each app sends to the keyring
+
+So the two sides match, the pairing request every app sends (on top of keyring's existing approve-card request of app,
+device and scopes) is:
+
+| Field | What it is | Example |
+|---|---|---|
+| `app` | Which app is asking, a stable short name | `exercise-analyzer` |
+| `app_label` | The app's name as Igor sees it on the card | `Exercise Analyzer` |
+| `device_id` | The shared device identity: one random id per device, made by the first of Igor's apps to pair and read by the rest; it never changes for that device | a UUID |
+| `device` | The device's label, also shared, editable by Igor | `Igor's iPhone 17 Pro` |
+| `platform` | `iOS`, `iPadOS`, `macOS` or `watchOS` | `iOS` |
+| `scopes` | Only the scopes this app needs | `["workout"]` |
+| `app_version` | The app's build, for the card and for debugging | `2.0.0 (3675)` |
+
+The answer is keyring's existing one (a 4-letter code to match on the card, a handle to poll, and when the request
+lapses). The card groups pending requests by `device_id`, which is what "approve every pending request from this
+device" approves, and "revoke device" revokes every key issued to that `device_id`.
 
 ## What's shared, and where
 
@@ -75,6 +96,4 @@ apps. If Igor prefers fewest moving parts over per-app revocation, B is simpler 
 
 ## Open questions for Igor
 
-1. A (one key per app, a card each), B (one shared key), or C (per-app keys, one-tap device approval)?
-   Recommended: C.
-2. Should a new device's first app pair the others in the background, or should each app pair when first opened?
+1. Should a new device's first app pair the others in the background, or should each app pair when first opened?
