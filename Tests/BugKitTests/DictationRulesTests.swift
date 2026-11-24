@@ -50,16 +50,16 @@ import Testing
   #expect(DictationRules.engineChange(running: true, recentRebuilds: 9) == .ignore)
   // Stopped: rebuilt, early or late, up to the limit in the window.
   #expect(DictationRules.engineChange(running: false, recentRebuilds: 0) == .rebuild)
-  #expect(DictationRules.engineChange(running: false, recentRebuilds: DictationRules.rebuildLimit - 1) == .rebuild)
-  #expect(DictationRules.engineChange(running: false, recentRebuilds: DictationRules.rebuildLimit) == .fail)
+  #expect(DictationRules.engineChange(running: false, recentRebuilds: 2) == .rebuild)
+  #expect(DictationRules.engineChange(running: false, recentRebuilds: 3) == .fail)
 }
 
 // #142: rebuilds count only inside the window, so a route that changes now and then keeps following it.
 @Test func onlyRecentRebuildsCountTowardTheLimit() {
-  let window = DictationRules.rebuildWindow
   #expect(DictationRules.recentRebuilds([], now: 100) == 0)
   #expect(DictationRules.recentRebuilds([95, 99], now: 100) == 2)
-  #expect(DictationRules.recentRebuilds([100 - window - 0.1, 99], now: 100) == 1)
+  #expect(DictationRules.recentRebuilds([90, 99], now: 100) == 2)
+  #expect(DictationRules.recentRebuilds([89.9, 99], now: 100) == 1)
   #expect(DictationRules.recentRebuilds([1, 2, 3], now: 100) == 0)
 }
 
