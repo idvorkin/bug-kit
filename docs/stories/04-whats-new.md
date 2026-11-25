@@ -42,7 +42,7 @@ Part of the [BugKit stories](README.md). What's new was built in Context Grabber
 - **Summary:** A change opens its story
 - **From:** CG #232 (5227ba9)
 - **Status:** `WhatsNew.stories(fromMarkdown:file:baseURL:)` with `WhatsNewView`.
-  - Verified on the host by `testEachStoryLinksToItsHeading` and `testBugKitsOwnStoriesParse`.
+  - Verified on the host by `eachStoryLinksToItsHeading` and `bugKitsOwnStoriesParse`.
   - The view is verified by typecheck.
 
 #### Use Case:
@@ -62,7 +62,7 @@ Part of the [BugKit stories](README.md). What's new was built in Context Grabber
 
 - **Summary:** A commit that names its story only in its message, or through its issue, still shows
 - **From:** CG #246 (6b1d0aa)
-- **Status:** `WhatsNew.parse(subject:body:issueStories:)` with `issueStories(fromMarkdown:)`. Verified on the host by `testASubjectWithoutAStoryFindsItInTheMessageOrThroughItsIssue`.
+- **Status:** `WhatsNew.parse(subject:body:issueStories:)` with `issueStories(fromMarkdown:)`. Verified on the host by `aSubjectWithoutAStoryFindsItInTheMessageOrThroughItsIssue`.
 
 #### Use Case:
 - **As a** developer who wrote a plain subject and named the story in the body
@@ -85,7 +85,7 @@ Part of the [BugKit stories](README.md). What's new was built in Context Grabber
 - **Summary:** Dismissed with its ✕, kept in settings
 - **From:** CG story 148 (adfed5a, `WhatsNewSeenUITests`)
 - **Status:**
-  - `WhatsNewSeen` and `WhatsNewRow`. Verified on the host by `testTheSeenStoreHidesTheRowUntilSomethingNewer` and `testHomeRowGoesOnceSeenAndComesBackForSomethingNewer`.
+  - `WhatsNewSeen` and `WhatsNewRow`. Verified on the host by `theSeenStoreHidesTheRowUntilSomethingNewer` and `homeRowGoesOnceSeenAndComesBackForSomethingNewer`.
   - The row is verified by typecheck. On iOS its ✕ is a 44×44 pt touch target, verified in the simulator by `whatsNewDismissIsATouchSizedTarget` (#35).
 
 #### Use Case:
