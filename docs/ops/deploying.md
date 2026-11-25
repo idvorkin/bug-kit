@@ -131,8 +131,8 @@ signing. `deploy-all.sh` runs it after the installs; an app's own install recipe
 `native-run-device`, MM `just ipad`) adds one line after its install, `"$HOME/gits/bug-kit/scripts/ota-upload.sh" … || true`,
 skipped when the script is absent.
 
-- **Where it goes:** `OTA_HOST` and `OTA_DIR`, else `"ota": {"host": …, "dir": …}` at the top of `apps.json`. With
-  neither it publishes nothing and says so. The prefix is the app entry's `ota_name`, else its `name`.
+- **Where it goes:** `OTA_HOST` and `OTA_DIR`, else `"ota": {"host": …, "dir": …}` at the top of `apps.json`; a
+  relative `dir` (or one starting `~/`) is under the host's login home. With neither it publishes nothing and says so. The prefix is the app entry's `ota_name`, else its `name`.
   `OTA_UPLOAD=0` turns it off.
 - **Named by the bundle's own commit** (`BugKitCommit`, `GitSha` or `BUGKIT_COMMIT` in its Info.plist), not the
   checkout's HEAD. A build from uncommitted changes becomes `<prefix>-<sha8>-dirty.ipa` and replaces the last one of
