@@ -81,3 +81,143 @@ redeem, the stored device and the words an app shows. No UI.
 
 - **Scenario:** Not paired
 - **Then:** the app says the device is not paired and to ask Larry to pair it.
+
+---
+
+## Pairing with the Cockpit by approving a card (bug-kit #144)
+
+Igor, 2026-11-24: *"do we have some kind of shared component so we can share our login key across all of the apps
+we have installed?"* He then picked option C: one key per app, plus a device identity every app shares, so that a
+new device needs one approval. The design is
+[the shared pairing spec](../superpowers/specs/2026-11-24-shared-cockpit-pairing-design.md). The keyring's side,
+approving every pending request from one device and revoking a device, is Larry's. The link flow above stays as the
+fallback.
+
+---
+
+### User Story 042:
+
+- **Summary:** One identity for this device, shared by every app of mine
+- **From:** bug-kit #144, option C
+- **Issues:** #144
+- **Status:** implemented in 3ed63fa (`CockpitDevice`, `CockpitDeviceStore`, `KeychainCockpitDeviceStore`,
+  `MemoryCockpitDeviceStore`).
+  - Verified on the host by `CockpitDeviceTests`. The first app makes the identity and the next one reads it. Two
+    apps making it at once agree on one id. A rename keeps the id. The Cockpit's address is shared. The stored names
+    match the agreed fields.
+  - Not yet run: the Keychain item in the shared access group across two apps on one device (a device check in the
+    first two apps to adopt it).
+
+#### Use Case:
+- **As someone** with several of my own apps on one phone
+- **I want** them to agree on what this device is called and where the Cockpit is
+- **so that** the second app pairs with nothing typed, and the Cockpit shows one device, not four
+
+#### Acceptance Criteria:
+- **Scenario:** The first app on a new device
+- **Given:** no app of mine on this device has paired
+- **When:** one of them pairs
+- **Then:**
+  - it makes a random id that never changes for this device;
+  - it names the device after its model and the start of the id, which I can rename;
+  - it keeps both on this device only, where every app of mine can read them.
+
+- **Scenario:** The next app
+- **Given:** another app already paired
+- **When:** this app pairs
+- **Then:** it sends the same id and name, and asks the Cockpit the first app used, with nothing typed.
+
+- **Scenario:** Two apps at once
+- **Given:** two apps make the identity at the same moment
+- **Then:** both end up with the first one's id; neither writes over the other.
+
+---
+
+### User Story 043:
+
+- **Summary:** Pair an app by approving a card in my Inbox
+- **From:** bug-kit #144; the request fields agreed with Larry on 2026-11-24
+- **Issues:** #144
+- **Status:** implemented in 3ed63fa (`CockpitPairingRequest`, `CockpitPairingClient`, `CockpitPairing.pair`).
+  - Verified on the host by `CockpitPairingClientTests` and `CockpitPairingFlowTests`. The start sends exactly
+    `app`, `app_label`, `device_id`, `device`, `platform`, `scopes` and `app_version`. The code reaches the app, and
+    the poll runs until approved. Deny, lapse, unknown, too many, Inbox down, a bad request, unreachable and malformed
+    each get their own words. A service off the Cockpit's host is refused. A short loss of the network keeps the
+    wait going, and the wait stops when the request lapses. Neither the handle nor the key is printed.
+  - Not yet run: a pairing against the live keyring, which needs an app to adopt it.
+
+#### Use Case:
+- **As** Igor
+- **I want to** tap *Pair with the Cockpit* and approve one card
+- **so that** I never need a code from anyone to sign an app in
+
+#### Acceptance Criteria:
+- **Scenario:** Approve
+- **Given:** I tapped *Pair with the Cockpit*
+- **When:** the app shows *Waiting for you to approve on the Cockpit… code 4F2K* and I approve the card showing
+  4F2K
+- **Then:** the app shows *Paired* within a few seconds and keeps the Cockpit's address for my other apps.
+
+- **Scenario:** Deny or no answer
+- **Given:** I denied the card, or nobody answered within 5 minutes
+- **Then:** the app says so in plain words, offers to ask again, and keeps nothing; the error can be copied.
+
+- **Scenario:** Off the tailnet
+- **Given:** the phone can't reach the Cockpit
+- **Then:** the app says to check Tailscale; a short drop while it waits doesn't end the wait.
+
+---
+
+### User Story 044:
+
+- **Summary:** Each app keeps its own key
+- **From:** Igor, 2026-11-22: "One key per app"; kept in option C
+- **Issues:** #144
+- **Status:** implemented in 3ed63fa (`CockpitKey`, `CockpitKeyStore`, `KeychainCockpitKeyStore`,
+  `MemoryCockpitKeyStore`, `CockpitPairing.forget`).
+  - Verified on the host by `CockpitPairingFlowTests`. The approved key is saved before `pair` returns, and a key
+    that can't be saved is a loud error. Forget removes this app's key and leaves the shared identity.
+  - Not yet run: the key in the app's own Keychain group on a device, unreadable by the other apps.
+
+#### Use Case:
+- **As** Igor
+- **I want** each app to hold only its own key and scopes
+- **so that** I can cut off one app without re-pairing the rest
+
+#### Acceptance Criteria:
+- **Scenario:** Approved
+- **Then:** the key is kept in this app's own Keychain, on this device only, before the app says *Paired*. If it
+  can't be kept, the app says to pair again, because the Cockpit hands a key over only once.
+
+- **Scenario:** Forget this pairing
+- **When:** I tap *Forget this pairing* in one app
+- **Then:** only that app's key is gone; the other apps and the shared identity are untouched.
+
+---
+
+### User Story 045:
+
+- **Summary:** When an app's key lapses, ask me again, once
+- **From:** the spec's step 4: keys lapse after 7 idle days, 90 days at most
+- **Issues:** #144
+- **Status:** implemented in 3ed63fa (`CockpitPairingStatus`, `CockpitPairing.status`, `CockpitPairing.keyRefused`).
+  - Verified on the host by `CockpitPairingFlowTests`. A refused key, or one past its 90 days, has lapsed and needs
+    pairing. The first refusal asks again and later ones don't, until a new key arrives. Each status has its words.
+  - BugKit has no pairing screen; each app shows these words with its own button.
+
+#### Use Case:
+- **As** Igor
+- **I want** an app whose key lapsed to say so and ask again by itself
+- **so that** it never fails quietly with a 401, and never fills my Inbox with cards
+
+#### Acceptance Criteria:
+- **Scenario:** A service refuses the key
+- **Given:** a service answered that the key is expired, revoked or unknown
+- **Then:**
+  - the app shows *Your Cockpit pairing expired, approve again?* and stops sending the key;
+  - it starts one new request on its own;
+  - further refusals before a new key start no more.
+
+- **Scenario:** 90 days
+- **Given:** the key is 90 days old
+- **Then:** the app treats it as lapsed without waiting for a refusal.
