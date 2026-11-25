@@ -26,15 +26,13 @@ protocol DictationCapture: AnyObject {
     private var audio: AsyncStream<Data>.Continuation?
     private var saved: SessionState?
     private var inputAtStart: String?
-    /// The microphone picked for this recording (nil for Automatic), and how many times the input coming back to it
-    /// has rebuilt the engine (#139).
+    /// The microphone picked for this recording (nil for Automatic), and the uptimes of this recording's engine
+    /// rebuilds, so a route flapping stops dictation rather than rebuilding forever (#139, #142).
     private var pickedInputID: String?
-    private var pickRebuilds = 0
+    private var rebuildTimes: [Double] = []
     private var startedAt = 0.0
-    /// The microphone as it was when the tap was installed, the format the tap reads, and whether this dictation has
-    /// already rebuilt its input after an engine change (#128).
+    /// The microphone as it was when the tap was installed, and the format the tap reads (#128).
     private var shapeAtStart: DictationAudioShape?
-    private var rebuilt = false
     private let observations = DictationObservations()
 
     private struct SessionState {
@@ -129,23 +127,16 @@ protocol DictationCapture: AnyObject {
         })
     }
 
-    /// #133, #139: every route change while capturing is logged with why and what moved; the input coming back to the
-    /// picked microphone keeps dictating, and a move elsewhere after the settling time stops it with the same fields.
+    /// #133, #139, #142: every route change while capturing is logged with why and what moved. It never stops
+    /// dictation: the engine change that comes with the input moving rebuilds onto the new input.
     private func routeChanged(reason: String, before: [String], after: [String], now: String?, posted: Double) {
       let since = posted - startedAt
       let back = DictationRules.backOnPick(picked: pickedInputID, current: now, tapInput: inputAtStart)
-      let stops = DictationRules.routeChangeStops(
-        sinceStart: since, inputChanged: now != inputAtStart, after: Self.shape(AVAudioSession.sharedInstance()),
-        backOnPick: back)
-      let action: DictationRouteChange = stops ? .stop : back ? .backOnPick : .keep
+      let action = DictationRules.routeChange(inputChanged: now != inputAtStart, backOnPick: back)
       let fields = DictationRules.routeChangeFields(
         sinceStart: since, reason: reason, inputBefore: before, inputAfter: after, inputAtStart: inputAtStart,
         inputNow: now, picked: pickedInputID, action: action)
       logger("dictation_route_change", fields)
-      guard stops else { return }
-      onFailure?(
-        "The microphone changed. Dictation stopped; your note is still here.",
-        fields.merging(["where": "audio_route"]) { _, new in new })
     }
 
     nonisolated private static func reasonName(_ notification: Notification) -> String {
@@ -202,9 +193,8 @@ protocol DictationCapture: AnyObject {
         try session.setPreferredInput(preferred)
         let (stream, continuation) = AsyncStream<Data>.makeStream(bufferingPolicy: .bufferingOldest(32))
         audio = continuation
-        rebuilt = false
+        rebuildTimes = []
         pickedInputID = preferredInputID
-        pickRebuilds = 0
         startedAt = ProcessInfo.processInfo.systemUptime
         try startEngine(continuation)
         return stream
@@ -237,17 +227,17 @@ protocol DictationCapture: AnyObject {
       inputAtStart = currentInputID
     }
 
-    /// #128: every engine reconfiguration while capturing is logged with what changed. A stopped engine is rebuilt
-    /// once early on (an AirPods HFP link coming up as dictation starts); otherwise dictation stops, the copied
-    /// error carrying the same fields.
+    /// #128, #142: every engine reconfiguration while capturing is logged with what changed. A stopped engine is
+    /// rebuilt on the input as it is now, at its format, whenever the change comes, so dictation follows the route
+    /// and the words so far stay; a run of rebuilds, or a rebuild that fails, stops it, the copied error carrying the
+    /// same fields.
     private func engineChanged(thisEngine: Bool) {
-      let since = ProcessInfo.processInfo.systemUptime - startedAt
+      let uptime = ProcessInfo.processInfo.systemUptime
+      let since = uptime - startedAt
       let running = engine.isRunning
       let after = Self.shape(AVAudioSession.sharedInstance())
-      let back = DictationRules.backOnPick(picked: pickedInputID, current: currentInputID, tapInput: inputAtStart)
       let action = DictationRules.engineChange(
-        sinceStart: since, running: running, rebuilt: rebuilt, after: after, backOnPick: back,
-        pickRebuilds: pickRebuilds)
+        running: running, recentRebuilds: DictationRules.recentRebuilds(rebuildTimes, now: uptime))
       let fields = DictationRules.engineChangeFields(
         sinceStart: since, thisEngine: thisEngine, running: running, before: shapeAtStart, after: after,
         action: action)
@@ -257,7 +247,7 @@ protocol DictationCapture: AnyObject {
       case .ignore: return
       case .fail: onFailure?(message, fields)
       case .rebuild:
-        if back { pickRebuilds += 1 } else { rebuilt = true }
+        rebuildTimes.append(uptime)
         guard let audio else { onFailure?(message, fields); return }
         if engine.isRunning { engine.stop() }
         if tapInstalled { engine.inputNode.removeTap(onBus: 0); tapInstalled = false }

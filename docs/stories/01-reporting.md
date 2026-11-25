@@ -208,18 +208,18 @@ Part of the [BugKit stories](README.md).
     `dictationATranscriptThatIsItsPhraseTwiceIsKeptOnce`; speech that really repeats stays, by
     `dictationSpeechThatRepeatsIsKeptAsSpoken`.
   - The permission prompts and music carrying on are device checks, still to do.
-  - An engine configuration change while dictating (#128, PR #135, c6906ac, v0.3.17): every one is logged as `dictation_engine_config`, and the
-    one-time rebuild in the first second (two on a Bluetooth HFP input) and the `engine_config` failure after it are
-    decided by `DictationRules.engineChange`, verified on the host by `DictationRulesTests`; an input moving onto the
-    headset in that window is left to the engine rebuild rather than stopped as a route change, decided by
-    `DictationRules.routeChangeStops` and verified by `anInputMovingOntoTheHeadsetAtStartIsLeftToTheEngineRebuild`;
-    the copied state and its own `where` by `dictationEngineChangeFailureCarriesWhatChanged` (Mac host). The capture itself is verified by
+  - An engine configuration change while dictating (#128, PR #135, c6906ac, v0.3.17; #142 makes it follow the route
+    whenever it changes): every one is logged as `dictation_engine_config`; the rebuild on the input as it is now,
+    early or late, and the `engine_config` failure after three rebuilds in ten seconds, are decided by
+    `DictationRules.engineChange` and `recentRebuilds`, verified on the host by
+    `aStoppedEngineIsRebuiltOnTheNewInputWheneverItChanges` and `onlyRecentRebuildsCountTowardTheLimit`; a route
+    change never stops dictation, decided by `DictationRules.routeChange` and verified by
+    `aRouteChangeFollowsTheNewInput`; the capture compiles for iOS (the CI adoption step, run on the Mac); the copied state and its own `where` by `dictationEngineChangeFailureCarriesWhatChanged` (Mac host). The capture itself is verified by
     typecheck. Dictation carrying on after AirPods take the input at start is an iPad/iPhone check with AirPods,
     still to do.
-  - The input coming back to the picked microphone (#139, CG #1264): it never stops dictation, and its engine change
-    rebuilds onto the pick at most twice, decided by `DictationRules.backOnPick`, `routeChangeStops` and
-    `engineChange`, verified on the host by `theInputComingBackToThePickKeepsDictating` and
-    `backOnThePickNeedsAPickTheTapLeft`; every route change is logged as `dictation_route_change` (#133), its fields
+  - The input coming back to the picked microphone (#139, CG #1264): it never stops dictation, decided by
+    `DictationRules.backOnPick` and `routeChange`, verified on the host by `backOnThePickNeedsAPickTheTapLeft` and
+    `aRouteChangeFollowsTheNewInput`; every route change is logged as `dictation_route_change` (#133), its fields
     by `aRouteChangeCarriesWhatChanged`. The capture is verified by an iOS device-SDK build. The iPad with AirPods and
     the built-in microphone picked is a device check, still to do.
   - The error is a `BugProblemView` with Copy error, behind `options.copyableErrors` (on), from CG's ProblemView
@@ -251,15 +251,25 @@ Part of the [BugKit stories](README.md).
 - **When:** I tap the microphone and the audio system moves the input onto the headset, or changes its format, in the
   first moments of listening
 - **Then:**
-  - dictation keeps listening, on the headset, without my tapping again: the first such change in the first second
-    (the first two seconds when the input is a Bluetooth headset) rebuilds the microphone once, and the input moving
-    onto the headset in that window is left to that rebuild rather than stopping dictation as a microphone change;
+  - dictation keeps listening, on the headset, without my tapping again: the stopped microphone is rebuilt on the
+    headset;
   - every change is in the log as `dictation_engine_config`: milliseconds since start, whether it was BugKit's own
     audio engine, whether the engine was still running, the sample rate and channel count before and after, the input
     and output port types, the I/O buffer duration, and what was done (`ignore`, `rebuild` or `fail`); a rebuild
     is followed by `dictation_engine_rebuilt` with the new rate and input;
-  - a second change, a change later on, or a rebuild that fails stops dictation with "The microphone stopped. Your
-    note is still here.", and what I typed or said so far stays.
+  - a rebuild that fails stops dictation with "The microphone stopped. Your note is still here.", and what I typed or
+    said so far stays.
+
+- **Scenario:** The microphone changes while I'm dictating (#142, CG #1398)
+- **Given:** I am dictating, a minute in or a second in
+- **When:** the audio system moves the input to another microphone (the AirPods drop and a USB microphone takes over,
+  or a headset connects), and the format changes with it (24 kHz mono to 48 kHz stereo, say)
+- **Then:**
+  - dictation keeps listening on the new microphone, without my tapping again, and the words heard so far stay;
+  - a route change is never "the microphone changed"; the engine change that comes with it rebuilds the microphone on
+    the new input, at its format;
+  - only a route flapping, three rebuilds inside ten seconds, stops dictation with "The microphone stopped. Your note
+    is still here.", the copied error carrying the engine change's fields.
 
 - **Scenario:** The headset takes the input from the microphone I picked, then gives it back (#139)
 - **Given:** I picked a microphone in the picker (the built-in one, say), and AirPods are connected
@@ -268,10 +278,8 @@ Part of the [BugKit stories](README.md).
 - **Then:**
   - dictation keeps listening the whole time, without my tapping again: on the headset after the start rebuild above,
     then on the microphone I picked; the input coming back to my pick is never "the microphone changed", whenever it
-    comes, and the engine change that comes with it rebuilds the microphone onto my pick (at most twice in one
-    recording);
-  - with Automatic, or when the input moves to a microphone I didn't pick, a change after the first moments still
-    stops dictation as before.
+    comes, and the engine change that comes with it rebuilds the microphone onto my pick;
+  - when the input moves to a microphone I didn't pick, dictation follows it (#142) rather than stopping.
 
 - **Scenario:** The log says why the microphone changed (#133, #139)
 - **Given:** I am dictating
@@ -279,8 +287,7 @@ Part of the [BugKit stories](README.md).
 - **Then:**
   - the log has `dictation_route_change` with the reason the system gave, the input port types before and after, the
     input dictation started on, the one it is on now, the picked one (or none for Automatic), the milliseconds since
-    start, and what was done (`keep`, `back_on_pick` or `stop`);
-  - when that change stops dictation, the copied error carries the same fields, with `where: audio_route`.
+    start, and what was done (`keep`, `follow` or `back_on_pick`); a route change never stops dictation (#142).
 
 - **Scenario:** Copying the error
 - **Given:** the dialog says why dictation failed
@@ -290,7 +297,7 @@ Part of the [BugKit stories](README.md).
     state (`auth`, `mic`, `recognizer` or `error`, and `mic_busy`), one per line;
   - when something failed underneath (the audio session, the recognizer, the engine), the state says what: `where`
     (`start`, `audio_send` or `recognizer`), the error's own words as `error`, and its `domain` and `code` (#117);
-  - when the microphone itself stopped, `where` says which: `audio_route` (the input changed), `engine_config` (the
+  - when the microphone itself stopped, `where` says which: `engine_config` (the
     audio engine was reconfigured, with the same fields as its `dictation_engine_config` log line), `interruption`
     or `audio_overflow` (#128);
   - the log has `ui` with `action: copy_error` and `from: tap`.

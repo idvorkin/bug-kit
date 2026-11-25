@@ -183,7 +183,8 @@ public struct DictationJoin: Equatable, Sendable {
       selectedMicrophoneID = defaults.string(forKey: Self.microphoneKey)
       capture.onFailure = { [weak self] message, state in
         guard let self, self.listening else { return }
-        // #128: the capture says where it failed (an input change, an engine reconfiguration, an interruption).
+        // #128: the capture says where it failed (an engine reconfiguration, an interruption, an audio overflow;
+        // a route change no longer fails, #142).
         self.fail(message, state.merging(["where": "audio_route"]) { first, _ in first })
         Task { _ = await self.finish(why: "input_lost") }
       }
