@@ -19,10 +19,11 @@
 # Exits: 0 published, already there, or nowhere configured; 64 usage; 66 not a signed device build; 1 the copy failed.
 set -uo pipefail
 app="" name="" repo="" force=0 dry=0
+usage() { echo "usage: ota-upload.sh <App.app> --name <prefix> [--repo <dir>] [--force] [--dry-run]" >&2; exit 64; }
 while [ $# -gt 0 ]; do
   case "$1" in
-    --name) name=${2:-}; shift 2 ;;
-    --repo) repo=${2:-}; shift 2 ;;
+    --name) [ $# -ge 2 ] || usage; name=$2; shift 2 ;;
+    --repo) [ $# -ge 2 ] || usage; repo=$2; shift 2 ;;
     --force) force=1; shift ;;
     --dry-run) dry=1; shift ;;
     -h | --help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
@@ -30,7 +31,7 @@ while [ $# -gt 0 ]; do
     *) app=$1; shift ;;
   esac
 done
-[ -n "$app" ] && [ -n "$name" ] || { echo "usage: ota-upload.sh <App.app> --name <prefix> [--repo <dir>] [--force] [--dry-run]" >&2; exit 64; }
+[ -n "$app" ] && [ -n "$name" ] || usage
 [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || { echo "ota-upload: --name must be letters, digits, . _ -" >&2; exit 64; }
 log=${OTA_UPLOAD_LOG:-$HOME/tmp/agent/notes/ota-uploads.log}
 note() { echo "ota-upload: $*"; mkdir -p "$(dirname "$log")" 2>/dev/null && echo "$(date '+%F %T') $name: $*" >>"$log" || true; }
@@ -39,7 +40,8 @@ note() { echo "ota-upload: $*"; mkdir -p "$(dirname "$log")" 2>/dev/null && echo
 config=${BUG_KIT_CONFIG:-$HOME/.config/bug-kit/apps.json}
 host=${OTA_HOST:-$(jq -r '.ota.host // empty' "$config" 2>/dev/null)}
 dir=${OTA_DIR:-$(jq -r '.ota.dir // empty' "$config" 2>/dev/null)}
-[ -n "$host" ] && [ -n "$dir" ] || { echo "ota-upload: no OTA_HOST/OTA_DIR and no \"ota\" in $config; nothing published"; exit 0; }
+[ -n "$host" ] && [ -n "$dir" ] || { note "no OTA_HOST/OTA_DIR and no \"ota\" in $config; nothing published"; exit 0; }
+dir=${dir#\~/}
 
 app=${app%/}
 info=$app/Info.plist
@@ -53,16 +55,16 @@ for key in BugKitCommit GitSha BUGKIT_COMMIT; do
   commit=""
 done
 dirty=0
-if [ -n "$commit" ]; then
-  case $commit in *-dirty) dirty=1; commit=${commit%-dirty} ;; esac
-elif [ -n "$repo" ]; then
+case $commit in *-dirty) dirty=1; commit=${commit%-dirty} ;; esac
+if [ -z "$commit" ] && [ -n "$repo" ]; then
   commit=$(git -C "$repo" rev-parse HEAD 2>/dev/null) || commit=""
-  [ -z "$(git -C "$repo" status --porcelain --untracked-files=no 2>/dev/null)" ] || dirty=1
   [ -z "$commit" ] || note "the bundle names no commit; using $repo's HEAD"
 fi
 [[ "$commit" =~ ^[0-9a-f]{4,40}$ ]] || { note "can't tell which commit $app was built from (no BugKitCommit/GitSha, no --repo)"; exit 66; }
-if [ -n "$repo" ]; then
-  long=$(git -C "$repo" rev-parse --short=8 "$commit^{commit}" 2>/dev/null) && commit=$long
+if [ -n "$repo" ] && full=$(git -C "$repo" rev-parse --verify --quiet "$commit^{commit}" 2>/dev/null); then
+  commit=$full
+  [ "$full" != "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" ] ||
+    [ -z "$(git -C "$repo" status --porcelain --untracked-files=no 2>/dev/null)" ] || dirty=1
 fi
 sha=${commit:0:8}
 file=$name-$sha$([ "$dirty" = 1 ] && echo -dirty).ipa

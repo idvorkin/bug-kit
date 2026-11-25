@@ -173,7 +173,9 @@ if [ "$installed" -gt 0 ] && [ "${OTA_UPLOAD:-1}" != 0 ]; then
   else
     mkdir -p "$(dirname "$ota_log")"
     "$uploader" "$PWD/$product" --name "$ota_name" --repo "$repo" </dev/null >/dev/null 2>>"$ota_log" 3>&- &
-    echo "over the air: publishing ${ota_name}'s build in the background ($ota_log)"
+    if [ -n "${OTA_HOST:-$(jq -r '.ota.host // empty' "$CONFIG")}" ] && [ -n "${OTA_DIR:-$(jq -r '.ota.dir // empty' "$CONFIG")}" ]; then
+      echo "over the air: publishing ${ota_name}'s build in the background ($ota_log)"
+    fi
   fi
 fi
 

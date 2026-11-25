@@ -95,3 +95,59 @@ def test_no_commit_and_no_repo_is_refused(tmp_path):
     out = run(app, env)
     assert out.returncode == 66
     assert not list(builds.iterdir())
+
+
+def make_repo(tmp_path: Path, dirty: bool) -> tuple[Path, str]:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=test@localhost"]
+    subprocess.run([*git, "init", "-q"], check=True)
+    (repo / "a.txt").write_text("a\n")
+    subprocess.run([*git, "add", "a.txt"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "one"], check=True)
+    if dirty:
+        (repo / "a.txt").write_text("b\n")
+    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    return repo, head
+
+
+def test_a_gitsha_build_from_a_dirty_checkout_never_takes_the_clean_name(tmp_path):
+    repo, head = make_repo(tmp_path, dirty=True)
+    app, builds, env = setup(tmp_path, {"GitSha": head[:7]})
+    (builds / f"demo-{head[:8]}.ipa").write_text("clean")
+    out = run(app, env, "--repo", str(repo))
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert (builds / f"demo-{head[:8]}-dirty.ipa").exists()
+    assert (builds / f"demo-{head[:8]}.ipa").read_text() == "clean"
+
+
+def test_a_gitsha_build_from_a_clean_checkout_takes_the_clean_name(tmp_path):
+    repo, head = make_repo(tmp_path, dirty=False)
+    app, builds, env = setup(tmp_path, {"GitSha": head[:7]})
+    out = run(app, env, "--repo", str(repo))
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert [p.name for p in builds.iterdir()] == [f"demo-{head[:8]}.ipa"]
+
+
+def test_a_home_relative_dir_is_the_login_home(tmp_path):
+    app, builds, env = setup(tmp_path, {"BugKitCommit": SHA})
+    (builds / "demo-89c1cabb.ipa").write_text("earlier")
+    out = run(app, {**env, "OTA_DIR": "~/builds"})
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert "already on" in out.stdout
+    assert [p.name for p in builds.iterdir()] == ["demo-89c1cabb.ipa"]
+
+
+def test_an_option_missing_its_value_is_a_usage_error(tmp_path):
+    app, _, env = setup(tmp_path, {"BugKitCommit": SHA})
+    for opt in ("--name", "--repo"):
+        out = subprocess.run([str(SCRIPT), str(app), opt], capture_output=True, text=True, env=env, timeout=10)
+        assert out.returncode == 64
+
+
+def test_nowhere_configured_is_logged(tmp_path):
+    app, _, env = setup(tmp_path, {"BugKitCommit": SHA})
+    del env["OTA_HOST"], env["OTA_DIR"]
+    out = run(app, env)
+    assert out.returncode == 0
+    assert "nothing published" in (tmp_path / "ota.log").read_text()
