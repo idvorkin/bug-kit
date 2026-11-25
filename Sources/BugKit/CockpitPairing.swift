@@ -205,6 +205,8 @@ public enum CockpitPairingError: Error, Equatable, Sendable {
   case refused(Int)
   /// No address given and none shared by another app.
   case noCockpit
+  /// The Cockpit's address is not https: the poll handle and the key would cross the network in the clear.
+  case notHTTPS
   /// The Keychain would not keep the key or the identity: the call and its status.
   case notSaved(String)
 
@@ -221,6 +223,7 @@ public enum CockpitPairingError: Error, Equatable, Sendable {
     case .refused(let status): return "The Cockpit answered \(status). Try pairing again."
     case .noCockpit:
       return "This app doesn't know the Cockpit's address yet. Pair another of your apps first, or enter it."
+    case .notHTTPS: return "The Cockpit's address must start with https://. Check it, then try again."
     case .notSaved(let detail):
       return "The Cockpit approved, but this device couldn't keep the key (\(detail)). Pair again."
     }
@@ -239,6 +242,7 @@ public enum CockpitPairingError: Error, Equatable, Sendable {
     case .malformed: return "malformed"
     case .refused: return "refused"
     case .noCockpit: return "no_cockpit"
+    case .notHTTPS: return "not_https"
     case .notSaved: return "not_saved"
     }
   }
@@ -267,7 +271,7 @@ public struct CockpitPairingClient: Sendable {
     self.transport = transport
   }
 
-  /// Files the approve card. Throws `CockpitPairingError`.
+  /// Files the approve card at an https `cockpit`. Throws `CockpitPairingError`.
   public func start(
     _ request: CockpitPairingRequest, device: CockpitDevice, at cockpit: URL
   ) async throws
@@ -299,6 +303,7 @@ public struct CockpitPairingClient: Sendable {
   }
 
   private func post(_ cockpit: URL, _ path: String, _ body: [String: Any]) async throws -> (Int, Data) {
+    guard cockpit.scheme?.lowercased() == "https" else { throw CockpitPairingError.notHTTPS }
     var request = URLRequest(url: cockpit.appendingPathComponent(path), timeoutInterval: 15)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")

@@ -38,9 +38,9 @@ extension CockpitDeviceStore {
     return device
   }
 
-  /// Shares the Cockpit's address with the other apps.
+  /// Shares the Cockpit's address with the other apps; an address that is not https is never shared.
   public func remember(cockpit: URL) throws {
-    guard var device = load(), device.cockpit != cockpit else { return }
+    guard cockpit.scheme?.lowercased() == "https", var device = load(), device.cockpit != cockpit else { return }
     device.cockpit = cockpit
     try replace(device)
   }

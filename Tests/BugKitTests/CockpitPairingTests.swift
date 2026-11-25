@@ -105,6 +105,13 @@ private final class Clock: @unchecked Sendable {
     #expect(shared.load()?.cockpit == cockpit)
   }
 
+  @Test func aPlainHTTPAddressIsNeverShared() throws {
+    let shared = MemoryCockpitDeviceStore()
+    _ = try shared.identity(defaultLabel: { "iPhone18,1" })
+    try shared.remember(cockpit: URL(string: "http://box.example:8456")!)
+    #expect(shared.load()?.cockpit == nil)
+  }
+
   @Test func itRoundTripsWithTheAgreedNames() throws {
     let device = CockpitDevice(deviceID: "D1", label: "Igor's iPad", cockpit: cockpit)
     let json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(device)) as? [String: Any])
@@ -259,6 +266,32 @@ private func dumped(_ value: some Any) -> String {
     let stub = StubCockpit()
     await #expect(throws: CockpitPairingError.noCockpit) {
       _ = try await pairing(stub).pair(cockpit: nil) { _ in }
+    }
+    #expect(stub.requests.isEmpty)
+  }
+
+  @Test func aPlainHTTPAddressIsRefusedBeforeAnythingIsSent() async {
+    let http = URL(string: "http://box.example:8456")!
+    let typed = StubCockpit()
+    let devices = MemoryCockpitDeviceStore()
+    await #expect(throws: CockpitPairingError.notHTTPS) {
+      _ = try await pairing(typed, devices: devices).pair(cockpit: http) { _ in }
+    }
+    #expect(typed.requests.isEmpty)
+    #expect(devices.load()?.cockpit == nil)
+
+    let shared = StubCockpit()
+    let sharedHTTP = MemoryCockpitDeviceStore(CockpitDevice(deviceID: "D1", label: "Igor's iPhone", cockpit: http))
+    await #expect(throws: CockpitPairingError.notHTTPS) {
+      _ = try await pairing(shared, devices: sharedHTTP).pair(cockpit: nil) { _ in }
+    }
+    #expect(shared.requests.isEmpty)
+  }
+
+  @Test func pollingAPlainHTTPAddressSendsNothing() async {
+    let stub = StubCockpit()
+    await #expect(throws: CockpitPairingError.notHTTPS) {
+      _ = try await CockpitPairingClient(transport: stub.transport).poll("h1", at: URL(string: "http://box.example:8456")!)
     }
     #expect(stub.requests.isEmpty)
   }
