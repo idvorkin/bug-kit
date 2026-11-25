@@ -100,7 +100,7 @@ fallback.
 - **Summary:** One identity for this device, shared by every app of mine
 - **From:** bug-kit #144, option C
 - **Issues:** #144
-- **Status:** implemented in COMMIT (`CockpitDevice`, `CockpitDeviceStore`, `KeychainCockpitDeviceStore`,
+- **Status:** implemented in 3ed63fa (`CockpitDevice`, `CockpitDeviceStore`, `KeychainCockpitDeviceStore`,
   `MemoryCockpitDeviceStore`).
   - Verified on the host by `CockpitDeviceTests`. The first app makes the identity and the next one reads it. Two
     apps making it at once agree on one id. A rename keeps the id. The Cockpit's address is shared. The stored names
@@ -138,7 +138,7 @@ fallback.
 - **Summary:** Pair an app by approving a card in my Inbox
 - **From:** bug-kit #144; the request fields agreed with Larry on 2026-11-24
 - **Issues:** #144
-- **Status:** implemented in COMMIT (`CockpitPairingRequest`, `CockpitPairingClient`, `CockpitPairing.pair`).
+- **Status:** implemented in 3ed63fa (`CockpitPairingRequest`, `CockpitPairingClient`, `CockpitPairing.pair`).
   - Verified on the host by `CockpitPairingClientTests` and `CockpitPairingFlowTests`. The start sends exactly
     `app`, `app_label`, `device_id`, `device`, `platform`, `scopes` and `app_version`. The code reaches the app, and
     the poll runs until approved. Deny, lapse, unknown, too many, Inbox down, a bad request, unreachable and malformed
@@ -173,7 +173,7 @@ fallback.
 - **Summary:** Each app keeps its own key
 - **From:** Igor, 2026-11-22: "One key per app"; kept in option C
 - **Issues:** #144
-- **Status:** implemented in COMMIT (`CockpitKey`, `CockpitKeyStore`, `KeychainCockpitKeyStore`,
+- **Status:** implemented in 3ed63fa (`CockpitKey`, `CockpitKeyStore`, `KeychainCockpitKeyStore`,
   `MemoryCockpitKeyStore`, `CockpitPairing.forget`).
   - Verified on the host by `CockpitPairingFlowTests`. The approved key is saved before `pair` returns, and a key
     that can't be saved is a loud error. Forget removes this app's key and leaves the shared identity.
@@ -200,7 +200,7 @@ fallback.
 - **Summary:** When an app's key lapses, ask me again, once
 - **From:** the spec's step 4: keys lapse after 7 idle days, 90 days at most
 - **Issues:** #144
-- **Status:** implemented in COMMIT (`CockpitPairingStatus`, `CockpitPairing.status`, `CockpitPairing.keyRefused`).
+- **Status:** implemented in 3ed63fa (`CockpitPairingStatus`, `CockpitPairing.status`, `CockpitPairing.keyRefused`).
   - Verified on the host by `CockpitPairingFlowTests`. A refused key, or one past its 90 days, has lapsed and needs
     pairing. The first refusal asks again and later ones don't, until a new key arrives. Each status has its words.
   - BugKit has no pairing screen; each app shows these words with its own button.
