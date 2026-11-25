@@ -183,3 +183,11 @@ def test_a_build_from_a_dirty_tree_stays_dirty_after_the_checkout_is_cleaned(tmp
     out = run(app, env, "--repo", str(repo), "--built-dirty", "1")
     assert out.returncode == 0, out.stdout + out.stderr
     assert [p.name for p in builds.iterdir()] == [f"demo-{head[:8]}-dirty.ipa"]
+
+
+def test_an_unknown_bugkit_commit_falls_through_to_gitsha(tmp_path):
+    # Context Grabber through deploy-all: no BUGKIT_COMMIT passed, so the bundle says "unknown" beside a real GitSha.
+    app, builds, env = setup(tmp_path, {"BugKitCommit": "unknown", "GitSha": SHA[:8]})
+    out = run(app, env)
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert [p.name for p in builds.iterdir()] == ["demo-89c1cabb.ipa"]

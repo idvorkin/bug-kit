@@ -44,7 +44,8 @@
         "app": "native/Build/Build/Products/Debug-iphoneos/GrabberNative.app",
         "settings": [
           "GIT_SHA={sha}",
-          "GIT_BRANCH={branch}"
+          "GIT_BRANCH={branch}",
+          "BUGKIT_COMMIT={describe}"
         ]
       }
     },

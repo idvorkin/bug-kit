@@ -54,7 +54,9 @@ info=$app/Info.plist
 # The commit the bundle says it was built from, else the checkout's.
 commit="" marked=0
 for key in BugKitCommit GitSha BUGKIT_COMMIT; do
-  commit=$(plutil -extract "$key" raw "$info" 2>/dev/null) && [ -n "$commit" ] && { [ "$key" = GitSha ] || marked=1; break; }
+  # A value that isn't a commit ("unknown" when nothing passed BUGKIT_COMMIT) falls through to the next key.
+  commit=$(plutil -extract "$key" raw "$info" 2>/dev/null) && [[ "$commit" =~ ^[0-9a-f]{4,40}(-dirty)?$ ]] &&
+    { [ "$key" = GitSha ] || marked=1; break; }
   commit=""
 done
 dirty=0
