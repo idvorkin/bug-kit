@@ -19,3 +19,5 @@ One pipeline run per train: finish the whole stack before the first push. Do not
 Review settles in one fix round. In round 1, fix every error and warning together. In later rounds, fix errors only and decide info findings in one pass. Cap review at two rounds; file the rest as Beads issues, and retain any unresolved errors as merge blockers.
 
 The pipeline Test step is host-only. The driving session owns simulator/device checks, runs them once under its build turn, and records the evidence and remaining physical-device checks in the PR body.
+
+- **Apple docs and Simulator/Previews: follow the `ios-codev` skill** (Igor, 2026-11-24). It covers looking up Apple APIs on Sosumi before coding, and previews first, then the Simulator, from the CLI on the Mac only. Read [`skills/ios-codev/SKILL.md`](https://github.com/idvorkin/chop-conventions/blob/main/skills/ios-codev/SKILL.md) (lands with chop-conventions #275), or `~/.claude/skills/ios-codev/SKILL.md` once the skill is symlinked.
