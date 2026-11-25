@@ -89,3 +89,17 @@ def test_describe_says_dirty_for_uncommitted_changes(tmp_path):
     out = dry_run(env)
     assert out.returncode == 0, out.stderr
     assert f"BUGKIT_COMMIT={sha}-dirty " in out.commands
+
+
+def test_the_installed_bundle_goes_over_the_air_under_its_ota_name(tmp_path):
+    env, _ = setup(tmp_path, dirty=False)
+    out = dry_run(env)
+    assert out.returncode == 0, out.stderr
+    assert "ota-upload.sh " in out.commands and "/Build/Demo.app --name demo --repo " in out.commands
+
+
+def test_ota_upload_off_leaves_it_out(tmp_path):
+    env, _ = setup(tmp_path, dirty=False)
+    out = dry_run({**env, "OTA_UPLOAD": "0"})
+    assert out.returncode == 0, out.stderr
+    assert "ota-upload.sh" not in out.commands

@@ -1,8 +1,13 @@
 {
   "poll_seconds": 300,
+  "ota": {
+    "host": "developer@builds-host",
+    "dir": "cockpit-data/builds"
+  },
   "apps": [
     {
       "name": "exercise-analyzer",
+      "ota_name": "ea",
       "bundle": "com.idvorkin.exerciseanalyzer",
       "repo": "~/gits/exercise-analyzer",
       "pull_extra": [

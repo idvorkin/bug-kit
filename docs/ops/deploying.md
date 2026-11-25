@@ -107,6 +107,7 @@ Never run two `-allowProvisioningUpdates` builds at the same time on one Mac, ac
 3. Inside the signing lock, it waits for Mac unlock and prevents display sleep while building once, for the
    first device. Account-access errors stop the run without retrying or installing.
 4. It installs and launches on each paired iPhone and iPad.
+5. Once at least one device took the build, it publishes that same bundle over the air in the background (below).
 
 It needs a `build` object in the app's entry in `~/.config/bug-kit/apps.json` (see `listener/apps.example.json`).
 
@@ -117,6 +118,33 @@ What happens on each device:
 - **New device:** a device not yet in the provisioning profile fails to install a build made for another device. Run one build with that device as the destination, with the Xcode account signed in: `deploy-all.sh <app> --register <device>`. After that the cached profile lists it. CG registered an iPad this way on 2026-10-07. See [signing.md](signing.md).
 - **The watch:** the watch app is embedded in the phone build (`App.app/Watch/AppWatch.app`), so `--watch` installs it from the same product. The watch takes an install only when it is on the wrist and awake. Errors 1011 or 4000, a "usage assertion" failure, or a timeout mean it is asleep, not that the build is bad. Say so instead of retrying.
 - **Unverified:** that one `Debug-iphoneos` product installs on every device already in the profile. It follows from how automatic signing embeds the team profile, but no repo had done it in a script before `deploy-all.sh`, and `deploy-all.sh` has only been dry-run.
+
+## Over the air: the builds folder is never behind the devices
+
+A person installs a development build from a page (Igor's Cockpit `/builds`) when the Mac can't reach the device.
+That page is only useful if it has what the devices run, so every install also publishes the installed bundle there
+(Igor, 2026-11-25: "Why new builds not uploaded", "And any other updated apps").
+
+`scripts/ota-upload.sh <App.app> --name <prefix> [--repo <checkout>]` zips the bundle into `Payload/` as an ipa and
+copies it to `<prefix>-<sha8>.ipa`. It packages the same bytes the install used, so there is no second build or
+signing. `deploy-all.sh` runs it after the installs; an app's own install recipe (EA `run-device`, CG
+`native-run-device`, MM `just ipad`) adds one line after its install, `"$HOME/gits/bug-kit/scripts/ota-upload.sh" … || true`,
+skipped when the script is absent.
+
+- **Where it goes:** `OTA_HOST` and `OTA_DIR`, else `"ota": {"host": …, "dir": …}` at the top of `apps.json`. With
+  neither it publishes nothing and says so. The prefix is the app entry's `ota_name`, else its `name`.
+  `OTA_UPLOAD=0` turns it off.
+- **Named by the bundle's own commit** (`BugKitCommit`, `GitSha` or `BUGKIT_COMMIT` in its Info.plist), not the
+  checkout's HEAD. A build from uncommitted changes becomes `<prefix>-<sha8>-dirty.ipa` and replaces the last one of
+  that name, so it never passes for the clean commit.
+- **Already there:** the file is touched rather than copied, so the page, which shows the newest per app per day,
+  puts it on top.
+- **Never fails the deploy.** `deploy-all.sh` starts it in the background with its output closed (a caller's `tee`
+  doesn't wait on it, and the signing lock is released at once). Each result is one line in
+  `~/tmp/agent/notes/ota-uploads.log`.
+- **Only a signed device build** (an `embedded.mobileprovision` in the bundle) is published. A development profile
+  installs only on the devices it lists. The page writes the install manifest itself from the ipa's Info.plist, so
+  the ipa goes alone.
 
 ## Destination errors
 
