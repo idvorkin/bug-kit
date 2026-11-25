@@ -291,7 +291,8 @@ private func dumped(_ value: some Any) -> String {
   @Test func pollingAPlainHTTPAddressSendsNothing() async {
     let stub = StubCockpit()
     await #expect(throws: CockpitPairingError.notHTTPS) {
-      _ = try await CockpitPairingClient(transport: stub.transport).poll("h1", at: URL(string: "http://box.example:8456")!)
+      let client = CockpitPairingClient(transport: stub.transport)
+      _ = try await client.poll("h1", at: URL(string: "http://box.example:8456")!)
     }
     #expect(stub.requests.isEmpty)
   }
