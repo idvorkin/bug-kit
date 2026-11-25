@@ -811,7 +811,8 @@ app with `KeychainCockpitDeviceStore(accessGroup:).rename(to:)`. The first app t
 hardware model and the first four characters of its id (`iPhone18,1 7F3A`). The request sends `app`, `app_label`,
 `device_id`, `device`, `platform`, `scopes` and `app_version` to `POST /pair/start`, then polls `POST /pair/poll`
 every 2 seconds (or the interval the start returns) until Igor answers or the request lapses after 5 minutes. A
-short loss of the network while it polls doesn't end the wait. The key comes back once, and it is saved before
-`pair` returns. Neither the handle nor the key is printed or logged.
+short loss of the network while it polls doesn't end the wait. The Cockpit's address must be https: any other
+scheme fails with `CockpitPairingError.notHTTPS` before anything is sent, and is never shared with the other apps.
+The key comes back once, and it is saved before `pair` returns. Neither the handle nor the key is printed or logged.
 
 BugKit has no pairing screen yet: each app shows the status words and the error with its own button.
