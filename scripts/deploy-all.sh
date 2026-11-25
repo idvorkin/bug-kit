@@ -16,6 +16,7 @@
 #   - one signing build at a time on this Mac: the whole run holds `lockf -k -t 900 ~/tmp/agent/locks/xcode-signing.lock`
 #     (MM mmn-af8), and inside it waits for any unlocked `xcodebuild … -allowProvisioningUpdates` (anchored pgrep);
 #   - a failed build never installs the previous bundle: success is "BUILD SUCCEEDED" in the output (EA #43);
+#   - after the installs, the installed bundle goes over the air (ota-upload.sh, in the background; never fails the run);
 #   - inside the lock, signing-guard.sh waits up to 2 minutes for Mac unlock (then exits 80, nothing built) and
 #     prevents display sleep during the build;
 #   - "No Accounts" or "Failed to load credentials" stops the run: tell the person and never retry automatically;
@@ -25,6 +26,7 @@
 set -uo pipefail
 CONFIG=${BUG_KIT_CONFIG:-$HOME/.config/bug-kit/apps.json}
 SIGNING_GUARD=$(cd "$(dirname "$0")" && pwd)/signing-guard.sh
+OTA_UPLOADER=$(cd "$(dirname "$0")" && pwd)/ota-upload.sh
 LOCK=${BUG_KIT_SIGNING_LOCK:-$HOME/tmp/agent/locks/xcode-signing.lock}
 app=${1:?usage: deploy-all.sh <app> [--only devs] [--register dev] [--watch] [--dry-run]}
 shift
@@ -139,7 +141,7 @@ else
   grep -q "BUILD SUCCEEDED" <<<"$out" || { echo "build failed: nothing installed" >&2; exit 1; }
 fi
 
-status=0
+status=0 installed=0
 while read -r name id udid type; do
   if ! run xcrun devicectl device install app --device "$id" "$product" >"$tmp/install" 2>&1; then
     if grep -q -i -E 'profile|0xe8008012|not.*(included|registered)' "$tmp/install"; then
@@ -150,6 +152,7 @@ while read -r name id udid type; do
     status=1
     continue
   fi
+  installed=$((installed + 1))
   if run xcrun devicectl device process launch --device "$id" "$bundle" >"$tmp/launch" 2>&1; then
     echo "== $name: installed and launched$([ "$dry" = 1 ] && echo " (dry run: nothing was)")"
   elif grep -q -E '10002|could not be, unlocked|locked' "$tmp/launch"; then
@@ -158,6 +161,24 @@ while read -r name id udid type; do
     echo "== $name: installed; launch failed: $(grep -m1 -i error "$tmp/launch" | cut -c1-140)"
   fi
 done <<<"$phones"
+
+# Over the air too (docs/ops/deploying.md "Over the air"): the bundle just installed goes to the builds folder, so it
+# is never behind the devices. In the background, after the installs, with every output closed: a slow copy neither
+# holds the signing lock nor keeps a caller's pipe open, and a failed one never fails the deploy (its log says why).
+if [ "$installed" -gt 0 ] && [ "${OTA_UPLOAD:-1}" != 0 ]; then
+  ota_name=$(jq -r '.ota_name // .name' <<<"$cfg")
+  ota_log=${OTA_UPLOAD_LOG:-$HOME/tmp/agent/notes/ota-uploads.log}
+  built_dirty=0; case $describe in *-dirty) built_dirty=1 ;; esac
+  if [ "$dry" = 1 ]; then
+    run "$OTA_UPLOADER" "$PWD/$product" --name "$ota_name" --repo "$repo" --built-dirty "$built_dirty"
+  else
+    mkdir -p "$(dirname "$ota_log")"
+    "$OTA_UPLOADER" "$PWD/$product" --name "$ota_name" --repo "$repo" --built-dirty "$built_dirty" </dev/null >/dev/null 2>>"$ota_log" 3>&- &
+    if [ -n "${OTA_HOST:-$(jq -r '.ota.host // empty' "$CONFIG")}" ] && [ -n "${OTA_DIR:-$(jq -r '.ota.dir // empty' "$CONFIG")}" ]; then
+      echo "over the air: publishing ${ota_name}'s build in the background ($ota_log)"
+    fi
+  fi
+fi
 
 if [ "$watch" = 1 ]; then
   [ -n "$watch_app" ] || { echo "--watch: no \"watch_app\" in the build object" >&2; exit 2; }

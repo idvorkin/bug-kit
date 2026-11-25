@@ -20,6 +20,7 @@ Pulling and deployment use `~/.config/bug-kit/apps.json`, the listener's file. W
 
 - `scripts/pull-reports.sh [--check] [app]`: pulls logs, reports and crash files from every device.
 - `scripts/deploy-all.sh <app> [--only …] [--register dev] [--watch] [--dry-run]`: builds once under the signing lock and installs on every device.
+- `scripts/ota-upload.sh <App.app> --name <prefix> [--repo dir]`: publishes an installed bundle to the over-the-air builds folder; `deploy-all.sh` runs it after every install ([deploying.md](deploying.md)).
 - `scripts/whats-new.sh <out.json> --repo … --base-url …`: the What's new build phase.
 
 ## Sources
