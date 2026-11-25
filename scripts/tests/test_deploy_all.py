@@ -103,3 +103,27 @@ def test_ota_upload_off_leaves_it_out(tmp_path):
     out = dry_run({**env, "OTA_UPLOAD": "0"})
     assert out.returncode == 0, out.stderr
     assert "ota-upload.sh" not in out.commands
+
+
+def uploader_args(commands: str) -> list[str]:
+    line = next(l for l in commands.splitlines() if "ota-upload.sh" in l)
+    return line.split()
+
+
+def test_started_by_a_relative_path_it_still_finds_the_uploader(tmp_path):
+    env, _ = setup(tmp_path, dirty=False)
+    root = SCRIPT.parents[1]
+    out = subprocess.run(
+        ["scripts/deploy-all.sh", "demo", "--dry-run"], capture_output=True, text=True, env=env, cwd=root
+    )
+    assert out.returncode == 0, out.stderr
+    uploader = next(a for a in uploader_args(out.stderr) if a.endswith("ota-upload.sh"))
+    assert Path(uploader).resolve() == SCRIPT.parent / "ota-upload.sh"
+
+
+def test_the_uploader_is_told_whether_the_build_was_dirty(tmp_path):
+    for dirty, flag in ((False, "0"), (True, "1")):
+        (tmp_path / flag).mkdir()
+        env, _ = setup(tmp_path / flag, dirty=dirty)
+        args = uploader_args(dry_run(env).commands)
+        assert args[args.index("--built-dirty") + 1] == flag

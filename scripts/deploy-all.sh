@@ -26,6 +26,7 @@
 set -uo pipefail
 CONFIG=${BUG_KIT_CONFIG:-$HOME/.config/bug-kit/apps.json}
 SIGNING_GUARD=$(cd "$(dirname "$0")" && pwd)/signing-guard.sh
+OTA_UPLOADER=$(cd "$(dirname "$0")" && pwd)/ota-upload.sh
 LOCK=${BUG_KIT_SIGNING_LOCK:-$HOME/tmp/agent/locks/xcode-signing.lock}
 app=${1:?usage: deploy-all.sh <app> [--only devs] [--register dev] [--watch] [--dry-run]}
 shift
@@ -167,12 +168,12 @@ done <<<"$phones"
 if [ "$installed" -gt 0 ] && [ "${OTA_UPLOAD:-1}" != 0 ]; then
   ota_name=$(jq -r '.ota_name // .name' <<<"$cfg")
   ota_log=${OTA_UPLOAD_LOG:-$HOME/tmp/agent/notes/ota-uploads.log}
-  uploader=$(cd "$(dirname "$0")" && pwd)/ota-upload.sh
+  built_dirty=0; case $describe in *-dirty) built_dirty=1 ;; esac
   if [ "$dry" = 1 ]; then
-    run "$uploader" "$PWD/$product" --name "$ota_name" --repo "$repo"
+    run "$OTA_UPLOADER" "$PWD/$product" --name "$ota_name" --repo "$repo" --built-dirty "$built_dirty"
   else
     mkdir -p "$(dirname "$ota_log")"
-    "$uploader" "$PWD/$product" --name "$ota_name" --repo "$repo" </dev/null >/dev/null 2>>"$ota_log" 3>&- &
+    "$OTA_UPLOADER" "$PWD/$product" --name "$ota_name" --repo "$repo" --built-dirty "$built_dirty" </dev/null >/dev/null 2>>"$ota_log" 3>&- &
     if [ -n "${OTA_HOST:-$(jq -r '.ota.host // empty' "$CONFIG")}" ] && [ -n "${OTA_DIR:-$(jq -r '.ota.dir // empty' "$CONFIG")}" ]; then
       echo "over the air: publishing ${ota_name}'s build in the background ($ota_log)"
     fi

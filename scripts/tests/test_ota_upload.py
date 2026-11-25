@@ -167,3 +167,19 @@ def test_no_commit_in_the_bundle_and_a_dirty_checkout_is_dirty(tmp_path):
     out = run(app, env, "--repo", str(repo))
     assert out.returncode == 0, out.stdout + out.stderr
     assert [p.name for p in builds.iterdir()] == [f"demo-{head[:8]}-dirty.ipa"]
+
+
+def test_the_build_time_dirty_state_decides_over_the_checkout_at_upload_time(tmp_path):
+    repo, head = make_repo(tmp_path, dirty=True)
+    app, builds, env = setup(tmp_path, {"GitSha": head[:7]})
+    out = run(app, env, "--repo", str(repo), "--built-dirty", "0")
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert [p.name for p in builds.iterdir()] == [f"demo-{head[:8]}.ipa"]
+
+
+def test_a_build_from_a_dirty_tree_stays_dirty_after_the_checkout_is_cleaned(tmp_path):
+    repo, head = make_repo(tmp_path, dirty=False)
+    app, builds, env = setup(tmp_path, {"GitSha": head[:7]})
+    out = run(app, env, "--repo", str(repo), "--built-dirty", "1")
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert [p.name for p in builds.iterdir()] == [f"demo-{head[:8]}-dirty.ipa"]

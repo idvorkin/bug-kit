@@ -4,11 +4,13 @@
 # second build or signing runs. The page writes the install manifest itself from the ipa's Info.plist: only the ipa
 # goes. See docs/ops/deploying.md "Over the air".
 #
-#   scripts/ota-upload.sh <App.app> --name <prefix> [--repo <checkout>] [--force] [--dry-run]
+#   scripts/ota-upload.sh <App.app> --name <prefix> [--repo <checkout>] [--built-dirty 0|1] [--force] [--dry-run]
 #
 #   --name     the file's prefix: <prefix>-<sha8>.ipa (grabber, ea, …)
 #   --repo     the checkout it was built from: turns the bundle's short commit into 8 characters, and is the fallback
 #              when the bundle names no commit (BugKitCommit, GitSha or BUGKIT_COMMIT in its Info.plist)
+#   --built-dirty  whether the tree had uncommitted changes when it was built, for a bundle whose commit carries no
+#              -dirty marker (GitSha); without it, --repo's checkout is asked at upload time
 #   --force    copy even when the folder already has that file (otherwise it is only touched, so it sorts newest)
 #   --dry-run  say what it would publish; copy nothing
 #
@@ -18,15 +20,16 @@
 # it never passes for the clean commit. Each run appends one line to ~/tmp/agent/notes/ota-uploads.log.
 # Exits: 0 published, already there, or nowhere configured; 64 usage; 66 not a signed device build; 1 the copy failed.
 set -uo pipefail
-app="" name="" repo="" force=0 dry=0
-usage() { echo "usage: ota-upload.sh <App.app> --name <prefix> [--repo <dir>] [--force] [--dry-run]" >&2; exit 64; }
+app="" name="" repo="" built_dirty="" force=0 dry=0
+usage() { echo "usage: ota-upload.sh <App.app> --name <prefix> [--repo <dir>] [--built-dirty 0|1] [--force] [--dry-run]" >&2; exit 64; }
 while [ $# -gt 0 ]; do
   case "$1" in
     --name) [ $# -ge 2 ] || usage; name=$2; shift 2 ;;
     --repo) [ $# -ge 2 ] || usage; repo=$2; shift 2 ;;
+    --built-dirty) [ $# -ge 2 ] && [[ "$2" =~ ^[01]$ ]] || usage; built_dirty=$2; shift 2 ;;
     --force) force=1; shift ;;
     --dry-run) dry=1; shift ;;
-    -h | --help) sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h | --help) sed -n '2,21p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
     -*) echo "ota-upload: unknown option $1" >&2; exit 64 ;;
     *) app=$1; shift ;;
   esac
@@ -56,6 +59,7 @@ for key in BugKitCommit GitSha BUGKIT_COMMIT; do
 done
 dirty=0
 case $commit in *-dirty) dirty=1; commit=${commit%-dirty} ;; esac
+[ "$marked" = 1 ] || [ -z "$built_dirty" ] || dirty=$built_dirty
 if [ -z "$commit" ] && [ -n "$repo" ]; then
   commit=$(git -C "$repo" rev-parse HEAD 2>/dev/null) || commit=""
   [ -z "$commit" ] || note "the bundle names no commit; using $repo's HEAD"
@@ -63,7 +67,7 @@ fi
 [[ "$commit" =~ ^[0-9a-f]{4,40}$ ]] || { note "can't tell which commit $app was built from (no BugKitCommit/GitSha, no --repo)"; exit 66; }
 if [ -n "$repo" ] && full=$(git -C "$repo" rev-parse --verify --quiet "$commit^{commit}" 2>/dev/null); then
   commit=$full
-  [ "$marked" = 1 ] || [ "$full" != "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" ] ||
+  [ "$marked" = 1 ] || [ -n "$built_dirty" ] || [ "$full" != "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" ] ||
     [ -z "$(git -C "$repo" status --porcelain --untracked-files=no 2>/dev/null)" ] || dirty=1
 fi
 sha=${commit:0:8}
