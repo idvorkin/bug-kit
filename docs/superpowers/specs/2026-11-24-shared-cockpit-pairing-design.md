@@ -80,7 +80,34 @@ device" approves, and "revoke device" revokes every key issued to that `device_i
   and the shared device identity. Every app already embeds BugKit, so no new dependency.
 - **Each app owns** its own key, the scopes it asks for, and where its "Pair" button sits.
 - **Storage:** each key in the app's own keychain; the device identity in a keychain group shared by Igor's apps,
-  which requires them all to be signed by the same team (they are).
+  which requires them all to be signed by the same team (they are). It is the group the link flow already shares, so
+  Context Grabber and Think a Card need no new entitlement.
+
+## Details the app side settles
+
+- **The device's first name.** The first app to pair names the device after its model and the first four characters
+  of its id, as `iPhone18,1 7F3A`. Two phones of one model then never share a name. Igor can rename it in any app,
+  and the id never changes.
+- **Two apps at once.** If two apps make the identity at the same moment, both keep the first one's id.
+- **The key is kept before "Paired".** The Cockpit hands a key over once. If the device can't keep it, the app says
+  to pair again rather than showing *Paired*.
+- **A short drop doesn't end the wait.** Losing the network while waiting keeps the request alive until its
+  5 minutes lapse.
+- **One re-ask per lapse.** When a service refuses the key, the app shows *Your Cockpit pairing expired, approve
+  again?* and starts one new request on its own. Further refusals start no more until a new key arrives, so a lapse
+  is one card, not one per failed request. A key past its 90 days counts as lapsed without waiting for a refusal.
+- **No pairing screen in BugKit yet.** BugKit gives each app the words and the copyable errors. The app puts them
+  beside its own *Pair* button.
+
+## For the keyring side (Larry)
+
+- Up to 3 requests can be open at once, so four apps on a new device asking together would get a *too many* on the
+  fourth. Raise the limit per device, or count by `device_id`.
+- The card shows `app`, now a short name (`exercise-analyzer`); show `app_label` instead.
+- Pairing again replaces the old key by app, origin and device *name*. Key that on `device_id`, so a rename doesn't
+  leave an old key live, and two devices given one name don't revoke each other.
+- The scopes known today are `ledger:write` and `cockpit:chat`. A new one, such as Exercise Analyzer's workout
+  stats, needs adding before an app asks for it, or the start is refused.
 
 ## Revocation
 

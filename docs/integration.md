@@ -759,3 +759,59 @@ remain in the supplied order, and duplicate titles are allowed. `BugKitAboutInfo
 main bundle; pass a different bundle explicitly when the Settings screen represents a different app target.
 Host tests cover metadata fallback, short/dirty commits and repository/commit URL construction. Once the
 build turn is granted, verify the actual built Info.plist and open both links in each adopting app's Settings.
+
+## Pair with the Cockpit
+
+Stories 042–045 (bug-kit #144). An app asks the Cockpit for its own key: Igor approves a card in his Inbox and the
+app keeps the key. Every app of Igor's on a device shares one identity (a random id, a label and the Cockpit's
+address), so the second app needs nothing typed, and the Cockpit can group one device's requests on one card. Each
+app's key stays in that app's own Keychain group, with only the scopes it asked for, so each can be revoked alone.
+The design is [the shared pairing spec](superpowers/specs/2026-11-24-shared-cockpit-pairing-design.md). The older
+link flow (`PairingLink`, `PairingClient`, stories 040–041) stays as the fallback.
+
+**Entitlements.** The identity lives in the shared access group the link flow already uses. Each app lists its own
+group **first**, then the shared one, in `keychain-access-groups` (XcodeGen `entitlements.properties`):
+
+```yaml
+keychain-access-groups:
+  - $(AppIdentifierPrefix)<the app's bundle id>     # first: the app's key and anything saved without a group
+  - $(AppIdentifierPrefix)com.idvorkin.paired-device  # shared: the device identity
+```
+
+Context Grabber and Think a Card already name both. Exercise Analyzer and Magic Monitor add the two lines. All
+the apps must be signed by the same team. Pass the shared group with its team prefix at runtime: an Info.plist key
+set to `$(AppIdentifierPrefix)com.idvorkin.paired-device` works, as Think a Card's `PairedDeviceAccessGroup` does.
+The build fills it in; an unsigned build leaves the bare name, which means nil (no sharing).
+
+```swift
+let group = (Bundle.main.object(forInfoDictionaryKey: "PairedDeviceAccessGroup") as? String)
+  .flatMap { $0 == "com.idvorkin.paired-device" ? nil : $0 }
+let pairing = CockpitPairing(
+  request: .current(app: "exercise-analyzer", appLabel: "Exercise Analyzer", scopes: ["ledger:write"]),
+  devices: KeychainCockpitDeviceStore(accessGroup: group),
+  keys: KeychainCockpitKeyStore())  // nil group: the app's own, the first in its entitlement
+
+// "Pair with the Cockpit". `cockpit` is nil when another app already shared the address.
+do {
+  let key = try await pairing.pair(cockpit: cockpitURL) { code in
+    status = .waiting(code: code)  // "Waiting for you to approve on the Cockpit… code 4F2K"
+  }
+  // Send `key.key` to the services in `key.services`.
+} catch let error as CockpitPairingError {
+  problem = error.problem(context: "settings.pair-cockpit")  // show it with BugProblemView
+}
+
+// A service answered 401 for the key: ask again on its own, once per lapse.
+if pairing.keyRefused() { startPairing() }
+```
+
+`pairing.status()` says what to show: not paired, paired, or *Your Cockpit pairing expired, approve again?* once a
+service refused the key or its 90 days have passed. `forget()` drops this app's key only. Rename the device for every
+app with `KeychainCockpitDeviceStore(accessGroup:).rename(to:)`. The first app to pair names the device after its
+hardware model and the first four characters of its id (`iPhone18,1 7F3A`). The request sends `app`, `app_label`,
+`device_id`, `device`, `platform`, `scopes` and `app_version` to `POST /pair/start`, then polls `POST /pair/poll`
+every 2 seconds (or the interval the start returns) until Igor answers or the request lapses after 5 minutes. A
+short loss of the network while it polls doesn't end the wait. The key comes back once, and it is saved before
+`pair` returns. Neither the handle nor the key is printed or logged.
+
+BugKit has no pairing screen yet: each app shows the status words and the error with its own button.
