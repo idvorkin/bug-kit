@@ -151,3 +151,19 @@ def test_nowhere_configured_is_logged(tmp_path):
     out = run(app, env)
     assert out.returncode == 0
     assert "nothing published" in (tmp_path / "ota.log").read_text()
+
+
+def test_a_clean_describe_marker_is_trusted_over_a_later_dirty_checkout(tmp_path):
+    repo, head = make_repo(tmp_path, dirty=True)
+    app, builds, env = setup(tmp_path, {"BUGKIT_COMMIT": head[:7]})
+    out = run(app, env, "--repo", str(repo))
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert [p.name for p in builds.iterdir()] == [f"demo-{head[:8]}.ipa"]
+
+
+def test_no_commit_in_the_bundle_and_a_dirty_checkout_is_dirty(tmp_path):
+    repo, head = make_repo(tmp_path, dirty=True)
+    app, builds, env = setup(tmp_path, {})
+    out = run(app, env, "--repo", str(repo))
+    assert out.returncode == 0, out.stdout + out.stderr
+    assert [p.name for p in builds.iterdir()] == [f"demo-{head[:8]}-dirty.ipa"]

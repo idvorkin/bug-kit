@@ -49,9 +49,9 @@ info=$app/Info.plist
 [ -f "$app/embedded.mobileprovision" ] || { note "$app has no embedded.mobileprovision: not a signed device build"; exit 66; }
 
 # The commit the bundle says it was built from, else the checkout's.
-commit=""
+commit="" marked=0
 for key in BugKitCommit GitSha BUGKIT_COMMIT; do
-  commit=$(plutil -extract "$key" raw "$info" 2>/dev/null) && [ -n "$commit" ] && break
+  commit=$(plutil -extract "$key" raw "$info" 2>/dev/null) && [ -n "$commit" ] && { [ "$key" = GitSha ] || marked=1; break; }
   commit=""
 done
 dirty=0
@@ -63,7 +63,7 @@ fi
 [[ "$commit" =~ ^[0-9a-f]{4,40}$ ]] || { note "can't tell which commit $app was built from (no BugKitCommit/GitSha, no --repo)"; exit 66; }
 if [ -n "$repo" ] && full=$(git -C "$repo" rev-parse --verify --quiet "$commit^{commit}" 2>/dev/null); then
   commit=$full
-  [ "$full" != "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" ] ||
+  [ "$marked" = 1 ] || [ "$full" != "$(git -C "$repo" rev-parse HEAD 2>/dev/null)" ] ||
     [ -z "$(git -C "$repo" status --porcelain --untracked-files=no 2>/dev/null)" ] || dirty=1
 fi
 sha=${commit:0:8}
