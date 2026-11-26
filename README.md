@@ -252,7 +252,7 @@ A bug in the app's own hooks (its context, screen names, extra files, logger bri
 ### Swift style
 
 Swift sources follow `.swift-format` (two-space indent, 120 columns; one-line `a = x; b = y` assignments stay allowed).
-`just fmt` rewrites them in place and `just lint` checks them; the no-mistakes lint step runs the same check.
+`just fmt` rewrites them in place and `just lint` checks them; CI and the no-mistakes lint step run the same check.
 It uses the `swift format` built into the Xcode toolchain, so there is nothing to install and no package dependency.
 
 ### Beads work tracking

@@ -35,6 +35,10 @@ jobs:
           for script in scripts/*.sh; do bash -n "$script"; done
           python3 -m py_compile listener/bug-listener
           python3 -m compileall -q listener Tests scripts/tests
+      - name: Swift format
+        run: |
+          swift format --version
+          swift format lint --strict --recursive Sources Tests Tools
       - name: Swift host tests
         run: swift test
       - name: Command Line Tools consumer build
